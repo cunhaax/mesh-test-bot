@@ -78,6 +78,19 @@ class Directory:
         return list(self.names)
 
 
+class DefaultsFileTest(unittest.TestCase):
+    """DEFAULTS is loaded from defaults.ini (next to the script) at import time."""
+
+    def test_the_two_required_options_have_no_default(self):
+        self.assertEqual((bot.DEFAULTS["channel"], bot.DEFAULTS["place"]), ("", ""))
+
+    def test_a_missing_defaults_file_is_a_clear_error(self):
+        with mock.patch.object(bot, "HERE", tempfile.mkdtemp()):
+            with self.assertRaises(SystemExit) as cm:
+                bot._load_defaults()
+        self.assertIn("defaults.ini", str(cm.exception))
+
+
 class ConfigTest(unittest.TestCase):
     def load(self, ini, *flags):
         path = os.path.join(tempfile.mkdtemp(), "bot.ini")

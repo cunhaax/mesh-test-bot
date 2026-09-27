@@ -83,30 +83,20 @@ MIN_RANDOM_LISTEN_MINUTES = 120.0  # with random_schedule, less than this needs 
 # meant to measure. --fixed-schedule is for a single operator's own controlled testing
 # (see the README) and is exempt from both.
 
-DEFAULTS = {
-    "host": "meshtastic.local",
-    "port": "4403",  # TCP port of the radio, or of whatever else speaks its TCP protocol
-    "channel": "",  # required: index of the channel, as shown in the app (0 = primary)
-    "channel_name": "",  # recommended: checked on connect, the session aborts if it differs
-    "place": "",  # required: where you are (city level), goes in every message
-    "keyword": "MTBOT",  # what our messages start with
-    "mode": "",  # empty = read from the radio's LoRa configuration
-    "mode_aliases": "BW62-SF7-CR6=NARROW_FAST",  # names for manual LoRa settings (BW-SF-CR)
-    "count": "3",  # messages per session
-    "interval_minutes": "5",  # only with random_schedule = false
-    "random_schedule": "true",  # random moments, so that everyone does not transmit at once
-    "min_gap_seconds": "60",  # never two of our messages closer than this
-    "session_tolerance_seconds": "60",  # messages the radio got this long before the session started still count
-    "report_window_minutes": "30",  # report at a random moment in the N min after the emission window
-    "timezone": "Europe/Lisbon",  # zone start_time refers to
-    "weekday": "saturday",  # monday..sunday, or "daily"
-    "start_time": "21:00",
-    "listen_minutes": "120",  # with random_schedule, below MIN_RANDOM_LISTEN_MINUTES is refused
-    "wake_before_minutes": "2",  # --schedule: connect this early to check the radio
-    "report_file": "report.txt",
-    "report_json_file": "report.jsonl",
-    "rx_file": "rx.log",
-}
+def _load_defaults():
+    """The bot's own default settings: defaults.ini, shipped next to this script (and
+    the single documented source of what every option does -- see load_config's
+    epilog). Every value is a string, like every source of config here (an .ini file,
+    an environment variable, a command-line flag)."""
+    path = os.path.join(HERE, "defaults.ini")
+    cp = configparser.ConfigParser(interpolation=None)
+    if not cp.read(path):
+        raise SystemExit("Missing %s: the bot's own default settings. Reinstall, or run "
+                          "this script from a full checkout of the repository." % path)
+    return dict(cp["bot"])
+
+
+DEFAULTS = _load_defaults()
 
 WEEKDAYS = {name: i for i, names in enumerate([
     ("monday", "mon"), ("tuesday", "tue"), ("wednesday", "wed"), ("thursday", "thu"),
@@ -191,7 +181,7 @@ def load_config(argv):
             cfg[key] = os.path.join(base, cfg[key])
     for key in ("channel", "place"):
         if not cfg[key].strip():
-            sys.exit("Set `%s`: in file %s, in variable %s%s, or with --%s (see bot.example.ini)" % (
+            sys.exit("Set `%s`: in file %s, in variable %s%s, or with --%s (see defaults.ini)" % (
                 key, args.config, ENV_PREFIX, key.upper(), key))
     try:
         cfg["channel"] = int(cfg["channel"])

@@ -183,14 +183,14 @@ docker compose down                         # stop
 - To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
 - If the container keeps restarting, `docker compose logs` says what's missing or wrong.
 - Every option can go in `.env` too, as `MTBOT_<NAME>`: see
-  [`bot.example.ini`](bot.example.ini) for the full list and what each one does.
+  [`defaults.ini`](defaults.ini) for the full list and what each one does.
 
 ## Installing with Docker, from source
 
 ```sh
 git clone <this repository> && cd mesh-test-bot
-mkdir data && cp bot.example.ini data/bot.ini
-# edit data/bot.ini: host, channel, channel_name, place
+mkdir data && printf '[bot]\nhost = 192.168.1.50\nchannel = 1\nplace = City\n' > data/bot.ini
+# edit data/bot.ini; every other option and its default is in defaults.ini
 docker compose up -d
 docker compose logs -f --no-log-prefix
 ```
@@ -232,7 +232,7 @@ Needs Python 3.9+ and the `meshtastic` library (pinned in `requirements.txt`).
 
 ```sh
 pip install -r requirements.txt
-cp bot.example.ini bot.ini                 # edit it
+printf '[bot]\nhost = 192.168.1.50\nchannel = 1\nplace = City\n' > bot.ini   # edit it
 python3 mesh_test_bot.py --schedule        # keeps running, repeats every week
 python3 mesh_test_bot.py --now             # or: one session right away
 ```
@@ -251,17 +251,18 @@ and this bot is not affiliated with or endorsed by it.
 
 ## Configuration
 
-See the comments in [`bot.example.ini`](bot.example.ini). Every option can come from
-four places, in this order of priority:
+See the comments in [`defaults.ini`](defaults.ini) for every option and what it does
+— it's the bot's own default settings, shipped with the code (don't edit it). Your own
+`bot.ini` only needs the options you want to change; `channel` and `place` are the only
+two with no default. Each option can come from four places, in this order of priority:
 
 1. a **flag** (`python3 mesh_test_bot.py --help`);
 2. an **environment variable** `MTBOT_<NAME>`, the option's name in upper case
    (`MTBOT_PLACE`, `MTBOT_CHANNEL`, `MTBOT_MIN_GAP_SECONDS`…). An empty variable counts
    as unset, so a `docker-compose.yml` can pass `${VAR}` through without accidentally
    clearing what's in the file;
-3. the `.ini` **file**, which doesn't even need to exist if the variables are enough
-   (the minimum is `channel` and `place`);
-4. the defaults.
+3. your **`bot.ini`**, which doesn't even need to exist if the variables are enough;
+4. `defaults.ini`.
 
 - **Timezone:** `start_time` is read in `timezone` (default `Europe/Lisbon`), not the
   machine's own zone. Someone in another zone (the Azores, say) keeps the same time

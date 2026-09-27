@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Only affects log timestamps; session times follow `timezone` in the config.
 ENV TZ=Europe/Lisbon
 
-COPY mesh_test_bot.py .
+COPY mesh_test_bot.py defaults.ini .
 
 # Config, report and rx log live in the mounted /data volume. Extra flags
 # replace only CMD, so e.g. `docker compose run bot --now` keeps the config.

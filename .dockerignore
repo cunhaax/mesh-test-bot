@@ -1,6 +1,7 @@
 .git
 data
 *.ini
+!defaults.ini
 *.log
 __pycache__
 .DS_Store
