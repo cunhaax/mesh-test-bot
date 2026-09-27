@@ -182,7 +182,8 @@ docker compose down                         # stop
 - Reports (`report.txt`, `report.jsonl`) and `rx.log` are in the `data/` folder.
 - To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
 - If the container keeps restarting, `docker compose logs` says what's missing or wrong.
-- Every available option is listed in [`install/env.example`](install/env.example).
+- Every option can go in `.env` too, as `MTBOT_<NAME>`: see
+  [`bot.example.ini`](bot.example.ini) for the full list and what each one does.
 
 ## Installing with Docker, from source
 
