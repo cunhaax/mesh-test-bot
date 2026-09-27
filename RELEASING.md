@@ -16,6 +16,16 @@ While still `0.x`, a breaking change bumps **MINOR** instead of MAJOR (`0.3.0` �
 `0.4.0`) — that's what `0.x` means: no stability promise yet. Move to `1.0.0`
 deliberately, when ready to commit to not breaking configs carelessly.
 
+## Day-to-day work
+
+Changes go through a **pull request**, not a direct push to `master` — a branch, a PR,
+squash-merged (the repo only allows squash merge; merge branches are auto-deleted).
+This isn't just tidiness: `gh release create --generate-notes` builds its "What's
+Changed" list from merged PRs, not raw commits — with no PRs, it produces nothing but
+an empty link to the full history (found the hard way, cutting `v0.1.0`). The PR title
+becomes the squash commit's message and the release notes' bullet, so write it as
+something a user of the bot would understand, not "wip" or "fix".
+
 ## Cutting one
 
 ```sh
@@ -26,7 +36,7 @@ git push origin v0.2.0
 The tag alone triggers the image workflow, which publishes `ghcr.io/cunhaax/mesh-test-bot:0.2.0`
 and `:0.2` (`:latest` stays on `master`, updated by every push there).
 
-Then draft the release notes from the actual commits since the last tag:
+Then draft the release notes from the merged PRs since the last tag:
 
 ```sh
 gh release create v0.2.0 --generate-notes
@@ -37,9 +47,10 @@ someone running the bot (internal refactors, test-only changes).
 
 ## After the first tag
 
-History from that point on is permanent: **no more squashing or force-pushing
-`master`.** A rewritten commit after a tag exists breaks that tag's ancestry and makes
-its release notes meaningless.
+History from that point on is permanent: **no more rewriting or force-pushing
+`master`'s history** (squash-merging a *new* PR is fine — that's a normal merge, not a
+rewrite of anything already on `master`). A rewritten commit after a tag exists breaks
+that tag's ancestry and makes its release notes meaningless.
 
 ## Pulling a bad release
 
