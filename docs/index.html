@@ -89,6 +89,57 @@ node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place |
   IP and point the bot at its Virtual Node instead — see the
   <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">MeshMonitor guide</a>.</p>
 
+  <h2>📐 Size your test</h2>
+  <p>LoRa has no real collision avoidance, so many stations sharing a short window can
+  flood the channel — the very congestion a range test is meant to measure. Check how
+  much of your window a coordinated test would actually use:</p>
+
+  <div class="calc card">
+    <div class="calc-grid">
+      <label>Participants
+        <input type="number" id="calcParticipants" value="20" min="1" max="5000">
+      </label>
+      <label>Messages per station
+        <input type="number" id="calcCount" value="3" min="1" max="50">
+      </label>
+      <label>LoRa mode
+        <select id="calcMode">
+          <option value="LONG_FAST" selected>LONG_FAST (default)</option>
+          <option value="MEDIUM_FAST">MEDIUM_FAST</option>
+          <option value="SHORT_FAST">SHORT_FAST</option>
+          <option value="SHORT_TURBO">SHORT_TURBO</option>
+          <option value="LONG_MODERATE">LONG_MODERATE</option>
+          <option value="LONG_SLOW">LONG_SLOW</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </label>
+      <label>Mesh density
+        <select id="calcMultiplier">
+          <option value="1.5">Sparse (mostly direct, ~1.5×)</option>
+          <option value="3" selected>Typical (a few hops, ~3×)</option>
+          <option value="5">Dense (many relays, ~5×)</option>
+        </select>
+      </label>
+      <label>Window (minutes)
+        <input type="number" id="calcWindow" value="120" min="1" max="10080">
+      </label>
+      <label>Target ceiling (%)
+        <input type="number" id="calcTarget" value="10" min="1" max="100">
+      </label>
+      <div class="calc-custom" id="calcCustomFields" hidden>
+        <label>Bandwidth (kHz) <input type="number" id="calcBw" value="250" min="10" max="1000"></label>
+        <label>Spreading factor <input type="number" id="calcSf" value="11" min="7" max="12"></label>
+        <label>Coding rate (4/x) <input type="number" id="calcCr" value="5" min="5" max="8"></label>
+      </div>
+    </div>
+    <div class="calc-result" id="calcResult"></div>
+    <p class="calc-note">Rough model: the standard LoRa time-on-air formula (Semtech
+    AN1200.13) times an estimated number of on-air retransmissions. Not a guarantee, and
+    not enforced by the bot itself — <code>message_count</code> is capped at 5 and
+    <code>listen_minutes</code> has a 120-minute floor regardless of this calculator (see
+    the README's Random-schedule limits).</p>
+  </div>
+
   <h2>Links</h2>
   <ul class="plain">
     <li><a href="https://github.com/cunhaax/mesh-test-bot">Repository &amp; full documentation</a></li>
@@ -102,5 +153,54 @@ node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place |
     Copyright © 2026 André Cunha · <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/LICENSE">GPL-3.0-or-later</a> · not affiliated with Meshtastic LLC or MeshMonitor
   </div>
 </footer>
+
+<script src="assets/calculator.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var modeSel = $("calcMode"), customFields = $("calcCustomFields");
+
+  function updateCustomVisibility() {
+    customFields.hidden = modeSel.value !== "custom";
+  }
+  modeSel.addEventListener("change", function () { updateCustomVisibility(); recalc(); });
+  updateCustomVisibility();
+
+  function currentLora() {
+    if (modeSel.value === "custom") {
+      return { bw: +$("calcBw").value || 250, sf: +$("calcSf").value || 11, cr: +$("calcCr").value || 5, name: "CUSTOM" };
+    }
+    var p = MeshCalc.PRESETS[modeSel.value];
+    return { bw: p.bw, sf: p.sf, cr: p.cr, name: modeSel.value };
+  }
+
+  function recalc() {
+    var participants = Math.max(1, +$("calcParticipants").value || 1);
+    var count = Math.max(1, +$("calcCount").value || 1);
+    var multiplier = +$("calcMultiplier").value;
+    var windowMinutes = Math.max(0.1, +$("calcWindow").value || 1);
+    var targetPercent = Math.max(1, +$("calcTarget").value || 10);
+    var lora = currentLora();
+    var msg = "MTBOT " + lora.name + " | City | " + count + "/" + count;
+    var payload = new TextEncoder().encode(msg).length + 16;
+    var r = MeshCalc.estimate({
+      bw: lora.bw, sf: lora.sf, cr: lora.cr, payloadBytes: payload,
+      participants: participants, messageCount: count, multiplier: multiplier,
+      windowMinutes: windowMinutes, targetPercent: targetPercent
+    });
+    var box = $("calcResult");
+    var over = r.percent > targetPercent;
+    box.className = "calc-result" + (over ? " over" : "");
+    box.innerHTML =
+      '<div class="big">' + r.percent.toFixed(1) + "%</div>" +
+      "<p>of a " + windowMinutes + "-minute window (~" + Math.round(r.totalAirtime) + "s of estimated combined airtime, ~" + r.perTx.toFixed(2) + "s per message).</p>" +
+      "<p>To stay under " + targetPercent + "%, use at least <strong>" + Math.ceil(r.minutesForTarget) + " minutes</strong>.</p>";
+  }
+
+  ["calcParticipants", "calcCount", "calcMultiplier", "calcWindow", "calcTarget", "calcBw", "calcSf", "calcCr"]
+    .forEach(function (id) { $(id).addEventListener("input", recalc); });
+  recalc();
+})();
+</script>
 </body>
 </html>
