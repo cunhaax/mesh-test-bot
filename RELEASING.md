@@ -40,3 +40,28 @@ someone running the bot (internal refactors, test-only changes).
 History from that point on is permanent: **no more squashing or force-pushing
 `master`.** A rewritten commit after a tag exists breaks that tag's ancestry and makes
 its release notes meaningless.
+
+## Pulling a bad release
+
+Deleting a Release and deleting the Docker image it published are two separate
+things — neither happens automatically with the other.
+
+```sh
+gh release delete v0.2.0 --cleanup-tag   # the GitHub Release + the git tag
+```
+
+`--cleanup-tag` matters: without it, the tag still exists, and `git checkout v0.2.0`
+still works. The published image (`ghcr.io/cunhaax/mesh-test-bot:0.2.0` and `:0.2`)
+is untouched by any of this — delete that version separately, under the repo's
+Packages tab (or `gh api -X DELETE /user/packages/container/mesh-test-bot/versions/<id>`,
+find `<id>` by listing versions first).
+
+This only stops *new* pulls of that exact version tag. `:latest` and any `:X.Y` a
+later push has since overwritten are already safe; anyone who pulled `:0.2.0` before
+you deleted it keeps their copy regardless.
+
+For anything more than a minor mistake (wrong notes, an accidental early tag): prefer
+publishing a fixed **PATCH** release over silently deleting the bad one, and for an
+actual security issue, use GitHub's Security Advisories to document it — that's more
+transparent than making a version quietly disappear, especially once the repo is
+public.
