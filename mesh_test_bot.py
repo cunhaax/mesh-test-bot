@@ -18,7 +18,7 @@ Range-test bot for Meshtastic radios (unofficial, not affiliated with the Meshta
 
 Runs a short, automatic on-air test on a Meshtastic channel:
 
-1. Sends `count` messages on the configured channel at random moments of the
+1. Sends `message_count` messages on the configured channel at random moments of the
    emission window (never two closer than `min_gap_seconds`), so that everybody
    running this does not transmit at once. `random_schedule = false` gives fixed
    times instead. A message looks like
@@ -144,7 +144,7 @@ def load_config(argv):
     ap.add_argument("--place", help="where you are, goes in every message")
     ap.add_argument("--keyword", help="what our messages start with")
     ap.add_argument("--mode", help="LoRa mode label to use instead of reading it from the radio")
-    ap.add_argument("--count", help="number of messages to send")
+    ap.add_argument("--count", dest="message_count", help="number of messages to send")
     ap.add_argument("--interval", dest="interval_minutes", help="minutes between messages")
     ap.add_argument("--start-time", dest="start_time", help="HH:MM in --timezone")
     ap.add_argument("--timezone", help="IANA zone start-time refers to, e.g. Europe/Lisbon")
@@ -204,7 +204,7 @@ def load_config(argv):
     if len(worst.encode("utf-8")) > MAX_TEXT_BYTES:
         sys.exit("The message does not fit in %d bytes (`place` too long): %r" % (MAX_TEXT_BYTES, worst))
     cfg["msg_re"] = message_regex(cfg["keyword"])
-    cfg["count"] = int(cfg["count"])
+    cfg["message_count"] = int(cfg["message_count"])
     cfg["interval_minutes"] = float(cfg["interval_minutes"])
     cfg["listen_minutes"] = float(cfg["listen_minutes"])
     cfg["wake_before_minutes"] = float(cfg["wake_before_minutes"])
@@ -212,10 +212,10 @@ def load_config(argv):
         cfg["random_schedule"], cfg["report_window_minutes"] = "false", "0"
     cfg["random_schedule"] = cfg["random_schedule"].strip().lower() in ("1", "true", "yes", "sim")
     if cfg["random_schedule"]:
-        if cfg["count"] > MAX_RANDOM_COUNT:
-            sys.exit("`count` above %d needs --fixed-schedule: with random_schedule, many "
+        if cfg["message_count"] > MAX_RANDOM_COUNT:
+            sys.exit("`message_count` above %d needs --fixed-schedule: with random_schedule, many "
                      "participants each sending that many messages risks flooding the channel: %r"
-                     % (MAX_RANDOM_COUNT, cfg["count"]))
+                     % (MAX_RANDOM_COUNT, cfg["message_count"]))
         if cfg["listen_minutes"] < MIN_RANDOM_LISTEN_MINUTES:
             sys.exit("`listen_minutes` below %g needs --fixed-schedule: with random_schedule, many "
                      "participants in a short window risks flooding the channel: %r"
@@ -772,12 +772,12 @@ def next_window(cfg, now):
 
 
 def plan_send_times(cfg, start, end, rng=random):
-    """When to send our messages. The window is cut in `count` equal segments and
-    each message falls at a random moment of its own segment, at least
+    """When to send our messages. The window is cut in `message_count` equal segments
+    and each message falls at a random moment of its own segment, at least
     `min_gap_seconds` before the segment ends, so two consecutive messages are never
     closer than that. Without `random_schedule`: every `interval_minutes` from `start`
     (but never closer than `min_gap_seconds`)."""
-    n = cfg["count"]
+    n = cfg["message_count"]
     gap = timedelta(seconds=cfg["min_gap_seconds"])
     if n <= 0:
         return []

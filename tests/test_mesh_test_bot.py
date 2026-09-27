@@ -99,7 +99,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_minimum_config_and_defaults(self):
         cfg = self.load("channel = 1\nplace = Lisboa\n")
-        self.assertEqual((cfg["channel"], cfg["place"], cfg["keyword"], cfg["count"]), (1, "Lisboa", "MTBOT", 3))
+        self.assertEqual((cfg["channel"], cfg["place"], cfg["keyword"], cfg["message_count"]), (1, "Lisboa", "MTBOT", 3))
         self.assertEqual(cfg["mode"], "")  # read from the radio
         self.assertEqual(cfg["mode_aliases"], {"BW62-SF7-CR6": "NARROW_FAST"})
         self.assertTrue(os.path.isabs(cfg["report_json_file"]))
@@ -108,7 +108,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_flags_override_the_file(self):
         cfg = self.load("channel = 1\nplace = Lisboa\n", "--place", "Porto", "--count", "5", "--mode", "MY_MODE")
-        self.assertEqual((cfg["place"], cfg["count"], cfg["mode"]), ("Porto", 5, "MY_MODE"))
+        self.assertEqual((cfg["place"], cfg["message_count"], cfg["mode"]), ("Porto", 5, "MY_MODE"))
 
     def test_channel_and_place_are_required(self):
         for ini in ("place = Lisboa\n", "channel = 1\n", "channel = 1\nplace =   \n"):
@@ -122,16 +122,16 @@ class ConfigTest(unittest.TestCase):
                 self.load("channel = 1\n" + ("" if ini.startswith("place") else "place = Lisboa\n") + ini)
 
     def test_random_schedule_rejects_too_many_messages_or_too_short_a_window(self):
-        for ini in ("count = 6\n", "listen_minutes = 119\n"):
+        for ini in ("message_count = 6\n", "listen_minutes = 119\n"):
             with self.subTest(ini=ini), self.assertRaises(SystemExit):
                 self.load("channel = 1\nplace = Lisboa\n" + ini)
         # exactly at the limit is fine
-        self.load("channel = 1\nplace = Lisboa\ncount = 5\n")
+        self.load("channel = 1\nplace = Lisboa\nmessage_count = 5\n")
         self.load("channel = 1\nplace = Lisboa\nlisten_minutes = 120\n")
 
     def test_fixed_schedule_is_exempt_from_the_random_schedule_limits(self):
-        cfg = self.load("channel = 1\nplace = Lisboa\ncount = 50\nlisten_minutes = 2\n", "--fixed-schedule")
-        self.assertEqual((cfg["count"], cfg["listen_minutes"]), (50, 2.0))
+        cfg = self.load("channel = 1\nplace = Lisboa\nmessage_count = 50\nlisten_minutes = 2\n", "--fixed-schedule")
+        self.assertEqual((cfg["message_count"], cfg["listen_minutes"]), (50, 2.0))
 
     def test_message_is_built_and_parsed_back(self):
         cfg = self.load("channel = 1\nplace = Vila Nova\n")
@@ -154,18 +154,18 @@ class EnvironmentTest(unittest.TestCase):
 
     def test_the_environment_alone_is_enough_no_file_needed(self):
         cfg = self.load(None, {"MTBOT_CHANNEL": "1", "MTBOT_PLACE": "Porto", "MTBOT_HOST": "10.0.0.2",
-                               "MTBOT_PORT": "4404", "MTBOT_COUNT": "5", "MTBOT_RANDOM_SCHEDULE": "false"})
-        self.assertEqual((cfg["channel"], cfg["place"], cfg["host"], cfg["port"], cfg["count"]),
+                               "MTBOT_PORT": "4404", "MTBOT_MESSAGE_COUNT": "5", "MTBOT_RANDOM_SCHEDULE": "false"})
+        self.assertEqual((cfg["channel"], cfg["place"], cfg["host"], cfg["port"], cfg["message_count"]),
                          (1, "Porto", "10.0.0.2", 4404, 5))
         self.assertFalse(cfg["random_schedule"])
 
     def test_precedence_flags_then_environment_then_file_then_defaults(self):
-        ini = "channel = 1\nplace = Ficheiro\nhost = 10.0.0.1\ncount = 4\n"
+        ini = "channel = 1\nplace = Ficheiro\nhost = 10.0.0.1\nmessage_count = 4\n"
         env = {"MTBOT_PLACE": "Ambiente", "MTBOT_HOST": "10.0.0.2"}
         cfg = self.load(ini, env, "--host", "10.0.0.3")
         self.assertEqual(cfg["host"], "10.0.0.3")  # flag
         self.assertEqual(cfg["place"], "Ambiente")  # environment beats the file
-        self.assertEqual(cfg["count"], 4)  # file beats the default (3)
+        self.assertEqual(cfg["message_count"], 4)  # file beats the default (3)
         self.assertEqual(cfg["keyword"], "MTBOT")  # default
 
     def test_an_empty_variable_counts_as_unset(self):
@@ -470,7 +470,7 @@ class ScheduleTest(unittest.TestCase):
     END = datetime(2026, 9, 19, 21, 30)
 
     def cfg(self, **kw):
-        cfg = {"count": 3, "random_schedule": True, "min_gap_seconds": 60.0,
+        cfg = {"message_count": 3, "random_schedule": True, "min_gap_seconds": 60.0,
                "interval_minutes": 5.0, "report_window_minutes": 30.0}
         cfg.update(kw)
         return cfg
@@ -478,7 +478,7 @@ class ScheduleTest(unittest.TestCase):
     def test_send_times_are_spread_and_never_too_close(self):
         gap = timedelta(seconds=60)
         for n in (1, 3, 10):
-            cfg = self.cfg(count=n)
+            cfg = self.cfg(message_count=n)
             seg = (self.END - self.START) / n
             for seed in range(300):
                 t = bot.plan_send_times(cfg, self.START, self.END, random.Random(seed))
@@ -496,22 +496,22 @@ class ScheduleTest(unittest.TestCase):
 
     def test_too_many_messages_for_the_window_are_reduced(self):
         end = self.START + timedelta(minutes=2)  # room for two calls a minute apart
-        t = bot.plan_send_times(self.cfg(count=5), self.START, end, random.Random(1))
+        t = bot.plan_send_times(self.cfg(message_count=5), self.START, end, random.Random(1))
         self.assertEqual(len(t), 2)
         self.assertGreaterEqual(t[1] - t[0], timedelta(seconds=60))
 
     def test_tiny_window_sends_at_the_start(self):
         end = self.START + timedelta(seconds=24)
-        t = bot.plan_send_times(self.cfg(count=1), self.START, end, random.Random(1))
+        t = bot.plan_send_times(self.cfg(message_count=1), self.START, end, random.Random(1))
         self.assertEqual(t, [self.START])
 
     def test_fixed_schedule_is_the_old_behaviour(self):
-        cfg = self.cfg(random_schedule=False, count=3)
+        cfg = self.cfg(random_schedule=False, message_count=3)
         t = bot.plan_send_times(cfg, self.START, self.END)
         self.assertEqual(t, [self.START + timedelta(minutes=m) for m in (0, 5, 10)])
 
     def test_fixed_schedule_never_goes_below_the_minimum_gap(self):
-        cfg = self.cfg(random_schedule=False, count=3, interval_minutes=0.1)  # 6 s, but the gap is 60 s
+        cfg = self.cfg(random_schedule=False, message_count=3, interval_minutes=0.1)  # 6 s, but the gap is 60 s
         t = bot.plan_send_times(cfg, self.START, self.END)
         self.assertEqual(t, [self.START + timedelta(seconds=s) for s in (0, 60, 120)])
 
@@ -764,7 +764,7 @@ class SessionTest(unittest.TestCase):
             from pubsub import pub
         except ImportError:
             self.skipTest("pypubsub not installed")
-        cfg = make_cfg(count=1, random_schedule=False, interval_minutes=0.0, min_gap_seconds=0.1,
+        cfg = make_cfg(message_count=1, random_schedule=False, interval_minutes=0.0, min_gap_seconds=0.1,
                        report_window_minutes=0.0, listen_minutes=0.05)
         iface = FakeIface()
         start = datetime.now(cfg["tz"])

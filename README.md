@@ -84,7 +84,7 @@ can see which formats are being left out.
 If many people use the bot, everyone transmitting at the exact same time would be
 counterproductive. So, by default:
 
-- **Messages:** the emission window is split into `count` equal parts and each message
+- **Messages:** the emission window is split into `message_count` equal parts and each message
   falls at a **random** moment of its own part. They end up spread out, and **never
   two in a row closer than `min_gap_seconds`** (60 s by default).
 - **Report:** comes out at a random moment between the end of the emission window and
@@ -287,14 +287,14 @@ LoRa has no real collision avoidance, so a test with many stations crammed into 
 short window causes exactly the congestion it's meant to measure: 100 stations each
 sending a handful of messages inside a half-hour window, on the same channel, can
 easily flood it once relays are counted. With `random_schedule` (the default), the bot
-refuses to start if `count` is above 5 or `listen_minutes` is under 120 (2h) — both
-`sys.exit` at startup, like an invalid `channel` or `place` would.
+refuses to start if `message_count` is above 5 or `listen_minutes` is under 120 (2h) —
+both `sys.exit` at startup, like an invalid `channel` or `place` would.
 
 This isn't based on how many stations are actually testing, on purpose: that number
 can't be known reliably (someone in a quiet spot and someone in the middle of a dense
 city could both be testing alongside 100 others, and neither could tell that from their
 own radio), and a check that depends on every participant correctly entering it would
-only be as good as the least careful one. A flat cap on `count` and a flat floor on
+only be as good as the least careful one. A flat cap on `message_count` and a flat floor on
 `listen_minutes` need nothing to be coordinated beyond what already has to be agreed for
 people to hear each other at all (`channel`, `weekday`, `start_time`) — they just keep
 any single random-schedule session, run by anyone, out of the range where it risks
@@ -404,12 +404,16 @@ channel_name = <channel name>
 weekday = <today, in English: monday, tuesday…>
 start_time = <~5 minutes from now, HH:MM>
 listen_minutes = 12
-count = 3
-random_schedule = true
+message_count = 3
+random_schedule = false
 min_gap_seconds = 60
 report_window_minutes = 4
 wake_before_minutes = 2
 ```
+
+`random_schedule = false` here only so this demo stays short: with it on, the emission
+window has to be at least 2 hours (see [Random-schedule
+limits](#random-schedule-limits)).
 
 ```sh
 docker compose up -d
@@ -417,11 +421,10 @@ docker compose logs -f --no-log-prefix
 ```
 
 The log shows the scheduled session (`Next session: …`), the connection to the radio 2
-minutes before, the randomly picked moments (`Sending at: … | report at …`), each
-message sent and each message heard, and at the end the report and the following
-session, a week later. **When you're done, run `docker compose down`** and restore the
-production `.ini`, or the container will transmit on the test channel again the
-following week.
+minutes before, the planned send times (`Sending at: … | report at …`), each message
+sent and each message heard, and at the end the report and the following session, a
+week later. **When you're done, run `docker compose down`** and restore the production
+`.ini`, or the container will transmit on the test channel again the following week.
 
 **Without touching the radio:** `--dry-run` shows just the schedule (`docker compose
 run --rm bot --dry-run`).
