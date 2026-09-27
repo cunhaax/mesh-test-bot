@@ -9,7 +9,9 @@
 # written to the data/ folder next to this file.
 services:
   bot:
-    # To avoid surprises on updates, you can pin a version: ...:1  or  ...:1.0.0
+    # To avoid surprises on updates, you can pin a version instead of :latest, e.g.
+    # ...:0.1 (tracks patch releases of 0.1.x) or ...:0.1.0 (exact) -- see the
+    # available tags at https://github.com/cunhaax/mesh-test-bot/pkgs/container/mesh-test-bot
     image: ghcr.io/cunhaax/mesh-test-bot:latest
     container_name: mesh-test-bot
     restart: unless-stopped
