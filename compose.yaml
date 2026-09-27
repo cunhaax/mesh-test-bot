@@ -1,0 +1,16 @@
+services:
+  bot:
+    # The already-built image (docker compose pull), or built from this directory.
+    image: ghcr.io/cunhaax/mesh-test-bot:latest
+    build: .
+    container_name: mesh-test-bot
+    restart: unless-stopped
+    # Instead of a data/bot.ini, you can put the options here (MTBOT_<NAME>, see README):
+    # environment:
+    #   MTBOT_HOST: "192.168.1.50"
+    #   MTBOT_CHANNEL: "1"
+    #   MTBOT_CHANNEL_NAME: "TestChannel"
+    #   MTBOT_PLACE: "City"
+    volumes:
+      # bot.ini (your station), plus the report and rx logs it writes
+      - ./data:/data

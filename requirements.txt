@@ -1,0 +1,4 @@
+# The bot relies on the meshtastic library's packet fields and its reconnect
+# behaviour: pin the version and bump it only after re-testing.
+meshtastic==2.7.11
+tzdata

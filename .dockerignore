@@ -1,0 +1,6 @@
+.git
+data
+*.ini
+*.log
+__pycache__
+.DS_Store

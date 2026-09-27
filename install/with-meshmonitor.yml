@@ -1,0 +1,42 @@
+# mesh-test-bot next to MeshMonitor: MeshMonitor keeps the connection to the radio
+# (which only accepts one TCP client) and the bot connects to its Virtual Node.
+# Full guide: docs/meshmonitor.md
+#
+#   1. Change the 5 lines marked "<-- change".
+#   2. docker compose -f with-meshmonitor.yml up -d
+#   3. Open http://localhost:8080 (admin / changeme), change the password and enable the
+#      Virtual Node on the source (the guide says how). Until then the bot keeps retrying,
+#      which is fine.
+services:
+  meshmonitor:
+    image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1
+    container_name: meshmonitor
+    restart: unless-stopped
+    environment:
+      - MESHTASTIC_NODE_IP=192.168.1.50            # <-- change: your radio's IP
+      - ALLOWED_ORIGINS=http://localhost:8080      # the exact address you open the UI at
+    ports:
+      # The web UI, this machine only. To open it from elsewhere, see the guide.
+      - "127.0.0.1:8080:3001"
+      # do NOT publish 4404 (the Virtual Node): it has no authentication. The bot reaches
+      # it over Docker's internal network, by the name "meshmonitor".
+    volumes:
+      - meshmonitor-data:/data
+
+  bot:
+    image: ghcr.io/cunhaax/mesh-test-bot:latest
+    container_name: mesh-test-bot
+    restart: unless-stopped
+    depends_on:
+      - meshmonitor
+    environment:
+      MTBOT_HOST: meshmonitor          # MeshMonitor, not the radio
+      MTBOT_PORT: "4404"               # the Virtual Node's port
+      MTBOT_CHANNEL: "1"               # <-- change: the test channel's index, as in the app
+      MTBOT_CHANNEL_NAME: TestChannel  # <-- change: that channel's name
+      MTBOT_PLACE: City                # <-- change: where you are
+    volumes:
+      - ./data:/data                   # reports and rx.log land here
+
+volumes:
+  meshmonitor-data:

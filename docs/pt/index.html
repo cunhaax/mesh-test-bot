@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mesh-test-bot</title>
+<meta name="description" content="Um bot não oficial para testes de alcance automáticos numa rede Meshtastic: mensagens agendadas, escuta com deteção de RF/MQTT, e um relatório por sessão.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./"><span class="dot"></span> mesh-test-bot</a>
+    <nav class="langs">
+      <a href="../">EN</a>
+      <a class="current" href="./">PT</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <span class="badge">não oficial · sem afiliação com o Meshtastic</span>
+    <h1>Testes de alcance automáticos na tua rede Meshtastic</h1>
+    <p class="lead">
+      Um bot pequeno que envia umas mensagens num canal em momentos aleatórios,
+      escuta as de todos os outros, e escreve um relatório de quem foi ouvido,
+      a quantos hops e com que sinal — sem precisares de ficar a vigiar um portátil.
+    </p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/cunhaax/mesh-test-bot#quick-install-docker-no-git">Instalação rápida</a>
+      <a class="btn ghost" href="https://github.com/cunhaax/mesh-test-bot">Ver no GitHub</a>
+    </div>
+    <p class="disclaimer">
+      Projeto não oficial, sem afiliação nem endosso do projeto Meshtastic. «Meshtastic»
+      é uma marca da Meshtastic LLC, usada aqui apenas para indicar com que tecnologia
+      este bot é compatível.
+    </p>
+  </section>
+
+  <h2>O que faz</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>📤 Envia, com agenda</h3>
+      <p>Umas mensagens curtas no teu canal de testes, espalhadas em momentos aleatórios
+      para que uma comunidade inteira não emita ao mesmo tempo — ou num intervalo fixo,
+      à tua escolha.</p>
+    </div>
+    <div class="card">
+      <h3>👂 Escuta o tempo todo</h3>
+      <p>Uma só ligação, mantida aberta, ouve toda a gente a correr o mesmo formato,
+      registando hops, SNR, RSSI, e se uma cópia veio via MQTT.</p>
+    </div>
+    <div class="card">
+      <h3>📝 Escreve um relatório</h3>
+      <p>Um ficheiro de texto legível e uma linha JSON por sessão — taxa de entrega,
+      duplicados, pistas de relay, e interrupções na ligação durante o teste.</p>
+    </div>
+    <div class="card">
+      <h3>🤖 Corre sozinho</h3>
+      <p>Imagem Docker para amd64, arm64 e arm/v7 (Raspberry Pi incluída). Repete-se
+      todas as semanas, e recupera sozinho de reinícios do rádio e quedas de WiFi.</p>
+    </div>
+  </div>
+
+  <h2>Como é um relatório</h2>
+  <pre class="report-sample"><span class="hl">Session</span> 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
+node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place | via | note
+!cafef00d | CD34 | LONG_FAST | 2/3 | 1 | 0 | 5.3 | -96 | Villatown | RF | direct
+!0a1b2c3d | EF56 | LONG_FAST | 3/3 | 0 | 1-2 | -2.5 | -112 | Valley | RF | relay 0xe9</pre>
+  <p>Uma linha por estação ouvida, cada uma com:</p>
+  <ul class="plain">
+    <li>📍 <strong>Onde está</strong> — o local que a própria estação reporta, e não uma estimativa a partir do rádio.</li>
+    <li>📊 <strong>Taxa de entrega</strong> — quantas das suas mensagens chegaram, e leituras duplicadas da mesma.</li>
+    <li>📶 <strong>Intervalo de hops, SNR e RSSI</strong> — o melhor e o pior valor visto durante a sessão.</li>
+    <li>🌐 <strong>RF ou MQTT</strong> — uma cópia que só chegou via MQTT é assinalada e nunca conta como alcance RF.</li>
+    <li>🔁 <strong>Uma pista de relay</strong> — que nó provavelmente a retransmitiu, quando o pacote deu mais do que um salto.</li>
+  </ul>
+  <p>Mais uma linha correspondente em <code>report.jsonl</code> por sessão, pensada para
+  um servidor ir buscar mais tarde — por agora os relatórios ficam só na tua máquina,
+  mas uma versão futura pode permitir enviá-los, por opção tua, para agregar
+  estatísticas de cobertura de toda a rede, com todos os que usarem o bot.</p>
+
+  <h2>Começar</h2>
+  <p>Um comando, se já tiveres Docker:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh</code></pre>
+  <p>Faz 4 perguntas — o IP do rádio, o índice e o nome do canal de testes, e a tua
+  cidade — e arranca o bot. Vê o README para instalar a partir do código, ou sem
+  Docker.</p>
+  <p>Já tens o <a href="https://meshmonitor.org">MeshMonitor</a> a correr? Salta o IP
+  do rádio e aponta o bot ao Virtual Node dele — vê o
+  <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">guia do MeshMonitor</a>
+  (em inglês).</p>
+
+  <h2>Ligações</h2>
+  <ul class="plain">
+    <li><a href="https://github.com/cunhaax/mesh-test-bot">Repositório e documentação completa</a> (em inglês)</li>
+    <li><a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">Correr junto do MeshMonitor</a> (em inglês)</li>
+    <li><a href="https://github.com/cunhaax/mesh-test-bot/blob/master/LICENSE">Licença (GPL-3.0-or-later)</a></li>
+  </ul>
+</main>
+
+<footer>
+  <div class="wrap">
+    Copyright © 2026 André Cunha · <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/LICENSE">GPL-3.0-or-later</a> · sem afiliação com a Meshtastic LLC nem com o MeshMonitor
+  </div>
+</footer>
+</body>
+</html>
