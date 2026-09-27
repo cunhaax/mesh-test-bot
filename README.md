@@ -346,6 +346,13 @@ python3 -m unittest discover tests
 The tests use made-up names and a fake radio for the connection, the reconnection and
 a full session. No radio needed.
 
+The landing page's airtime calculator ([`docs/assets/calculator.js`](docs/assets/calculator.js))
+has its own, separate suite (Node's built-in test runner, no dependencies):
+
+```sh
+node --test tests/test_calculator.js
+```
+
 ### Real, against the radio (with Docker)
 
 Once installed (see above), these are ways to try it out before leaving it scheduled.

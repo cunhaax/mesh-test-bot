@@ -90,6 +90,15 @@ class DefaultsFileTest(unittest.TestCase):
                 bot._load_defaults()
         self.assertIn("defaults.ini", str(cm.exception))
 
+    def test_a_broken_defaults_file_is_a_clear_error_too(self):
+        here = tempfile.mkdtemp()
+        for bad in ("not even ini syntax [[[", "[wrong-section]\nhost = x\n"):
+            open(os.path.join(here, "defaults.ini"), "w", encoding="utf-8").write(bad)
+            with self.subTest(bad=bad), mock.patch.object(bot, "HERE", here):
+                with self.assertRaises(SystemExit) as cm:
+                    bot._load_defaults()
+            self.assertIn("defaults.ini", str(cm.exception))
+
 
 class ConfigTest(unittest.TestCase):
     def load(self, ini, *flags):

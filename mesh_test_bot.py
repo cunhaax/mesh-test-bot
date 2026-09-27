@@ -98,10 +98,17 @@ def _load_defaults():
     an environment variable, a command-line flag)."""
     path = os.path.join(HERE, "defaults.ini")
     cp = configparser.ConfigParser(interpolation=None)
-    if not cp.read(path):
-        raise SystemExit("Missing %s: the bot's own default settings. Reinstall, or run "
-                          "this script from a full checkout of the repository." % path)
-    return dict(cp["bot"])
+    try:
+        if not cp.read(path):
+            raise SystemExit("Missing %s: the bot's own default settings. Reinstall, or run "
+                              "this script from a full checkout of the repository." % path)
+        return dict(cp["bot"])
+    except SystemExit:
+        raise
+    except Exception as e:
+        raise SystemExit("Could not read %s (%s: %s): the bot's own default settings are broken. "
+                          "Reinstall, or run this script from a full checkout of the repository."
+                          % (path, type(e).__name__, e))
 
 
 DEFAULTS = _load_defaults()

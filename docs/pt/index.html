@@ -160,51 +160,16 @@ node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place |
 
 <script src="../assets/calculator.js"></script>
 <script>
-(function () {
-  var $ = function (id) { return document.getElementById(id); };
-  var modeSel = $("calcMode"), customFields = $("calcCustomFields");
-
-  function updateCustomVisibility() {
-    customFields.hidden = modeSel.value !== "custom";
+MeshCalc.wireForm({
+  place: "Cidade",
+  of: function (windowMinutes, totalAirtime, perTx) {
+    return "de uma janela de " + windowMinutes + " min (~" + totalAirtime +
+      "s de airtime combinado estimado, ~" + perTx + "s por mensagem).";
+  },
+  target: function (targetPercent, minutes) {
+    return "Para ficar abaixo de " + targetPercent + "%, usa pelo menos <strong>" + minutes + " minutos</strong>.";
   }
-  modeSel.addEventListener("change", function () { updateCustomVisibility(); recalc(); });
-  updateCustomVisibility();
-
-  function currentLora() {
-    if (modeSel.value === "custom") {
-      return { bw: +$("calcBw").value || 250, sf: +$("calcSf").value || 11, cr: +$("calcCr").value || 5, name: "CUSTOM" };
-    }
-    var p = MeshCalc.PRESETS[modeSel.value];
-    return { bw: p.bw, sf: p.sf, cr: p.cr, name: modeSel.value };
-  }
-
-  function recalc() {
-    var participants = Math.max(1, +$("calcParticipants").value || 1);
-    var count = Math.max(1, +$("calcCount").value || 1);
-    var multiplier = +$("calcMultiplier").value;
-    var windowMinutes = Math.max(0.1, +$("calcWindow").value || 1);
-    var targetPercent = Math.max(1, +$("calcTarget").value || 10);
-    var lora = currentLora();
-    var msg = "MTBOT " + lora.name + " | Cidade | " + count + "/" + count;
-    var payload = new TextEncoder().encode(msg).length + 16;
-    var r = MeshCalc.estimate({
-      bw: lora.bw, sf: lora.sf, cr: lora.cr, payloadBytes: payload,
-      participants: participants, messageCount: count, multiplier: multiplier,
-      windowMinutes: windowMinutes, targetPercent: targetPercent
-    });
-    var box = $("calcResult");
-    var over = r.percent > targetPercent;
-    box.className = "calc-result" + (over ? " over" : "");
-    box.innerHTML =
-      '<div class="big">' + r.percent.toFixed(1) + "%</div>" +
-      "<p>de uma janela de " + windowMinutes + " min (~" + Math.round(r.totalAirtime) + "s de airtime combinado estimado, ~" + r.perTx.toFixed(2) + "s por mensagem).</p>" +
-      "<p>Para ficar abaixo de " + targetPercent + "%, usa pelo menos <strong>" + Math.ceil(r.minutesForTarget) + " minutos</strong>.</p>";
-  }
-
-  ["calcParticipants", "calcCount", "calcMultiplier", "calcWindow", "calcTarget", "calcBw", "calcSf", "calcCr"]
-    .forEach(function (id) { $(id).addEventListener("input", recalc); });
-  recalc();
-})();
+});
 </script>
 </body>
 </html>
