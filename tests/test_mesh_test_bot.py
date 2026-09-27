@@ -122,12 +122,20 @@ class ConfigTest(unittest.TestCase):
                 self.load("channel = 1\n" + ("" if ini.startswith("place") else "place = Lisboa\n") + ini)
 
     def test_random_schedule_rejects_too_many_messages_or_too_short_a_window(self):
-        for ini in ("message_count = 6\n", "listen_minutes = 119\n"):
+        for ini in ("message_count = 6\n", "listen_minutes = 119\n", "report_window_minutes = 59\n"):
             with self.subTest(ini=ini), self.assertRaises(SystemExit):
                 self.load("channel = 1\nplace = Lisboa\n" + ini)
         # exactly at the limit is fine
         self.load("channel = 1\nplace = Lisboa\nmessage_count = 5\n")
         self.load("channel = 1\nplace = Lisboa\nlisten_minutes = 120\n")
+        self.load("channel = 1\nplace = Lisboa\nreport_window_minutes = 60\n")
+
+    def test_min_gap_session_tolerance_and_wake_before_are_not_configurable(self):
+        # a bot.ini setting them is simply ignored: they are internal, fixed values
+        cfg = self.load("channel = 1\nplace = Lisboa\nmin_gap_seconds = 1\n"
+                        "session_tolerance_seconds = 1\nwake_before_minutes = 99\n")
+        self.assertEqual((cfg["min_gap_seconds"], cfg["session_tolerance_seconds"], cfg["wake_before_minutes"]),
+                         (bot.MIN_GAP_SECONDS, bot.SESSION_TOLERANCE_SECONDS, bot.WAKE_BEFORE_MINUTES))
 
     def test_fixed_schedule_is_exempt_from_the_random_schedule_limits(self):
         cfg = self.load("channel = 1\nplace = Lisboa\nmessage_count = 50\nlisten_minutes = 2\n", "--fixed-schedule")

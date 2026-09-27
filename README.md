@@ -86,16 +86,16 @@ counterproductive. So, by default:
 
 - **Messages:** the emission window is split into `message_count` equal parts and each message
   falls at a **random** moment of its own part. They end up spread out, and **never
-  two in a row closer than `min_gap_seconds`** (60 s by default).
+  two in a row closer than 2 minutes** (fixed, not configurable).
 - **Report:** comes out at a random moment between the end of the emission window and
-  `report_window_minutes` later, never closer than `min_gap_seconds` to the last
-  message. The bot keeps listening until then, which also catches delayed messages.
+  `report_window_minutes` later, never closer than 2 minutes to the last message. The
+  bot keeps listening until then, which also catches delayed messages.
 - **Listening starts right at the beginning of the window**, even if the first message
   only goes out later.
 
 `random_schedule = false` (or `--fixed-schedule`) reverts to a deterministic mode: one
-message every `interval_minutes` from the start (never below `min_gap_seconds`), and
-the report right at the end. That's what suits testing.
+message every `interval_minutes` from the start (never closer than 2 minutes), and the
+report right at the end. That's what suits testing.
 
 ## How messages are interpreted
 
@@ -122,9 +122,9 @@ the report right at the end. That's what suits testing.
   hands them over once the bot connects (the `T1`…`T8` we tested all arrived at the
   same instant). Every packet carries `rxTime`, the time the radio received it, and
   the bot **discards test messages the radio received before the session started**
-  (with a `session_tolerance_seconds` slack, 60 s by default), so they don't count
-  towards the wrong session. Discarded ones are kept in `rx.log` with the note
-  `before-session`, and the report says how many there were. Something delivered late
+  (with a 60 s slack, fixed), so they don't count towards the wrong session. Discarded
+  ones are kept in `rx.log` with the note `before-session`, and the report says how
+  many there were. Something delivered late
   but received **inside** the session (e.g. after a reconnection) counts normally. If
   the radio's clock isn't set, the packet has no `rxTime` and the bot does not discard it.
 - **Ignores:** other channels, its own node, and messages that don't match the shape above.
@@ -258,7 +258,7 @@ two with no default. Each option can come from four places, in this order of pri
 
 1. a **flag** (`python3 mesh_test_bot.py --help`);
 2. an **environment variable** `MTBOT_<NAME>`, the option's name in upper case
-   (`MTBOT_PLACE`, `MTBOT_CHANNEL`, `MTBOT_MIN_GAP_SECONDS`…). An empty variable counts
+   (`MTBOT_PLACE`, `MTBOT_CHANNEL`, `MTBOT_LISTEN_MINUTES`…). An empty variable counts
    as unset, so a `docker-compose.yml` can pass `${VAR}` through without accidentally
    clearing what's in the file;
 3. your **`bot.ini`**, which doesn't even need to exist if the variables are enough;
@@ -287,20 +287,23 @@ LoRa has no real collision avoidance, so a test with many stations crammed into 
 short window causes exactly the congestion it's meant to measure: 100 stations each
 sending a handful of messages inside a half-hour window, on the same channel, can
 easily flood it once relays are counted. With `random_schedule` (the default), the bot
-refuses to start if `message_count` is above 5 or `listen_minutes` is under 120 (2h) —
-both `sys.exit` at startup, like an invalid `channel` or `place` would.
+refuses to start if `message_count` is above 5, `listen_minutes` is under 120 (2h), or
+`report_window_minutes` is under 60 (1h) — all three `sys.exit` at startup, like an
+invalid `channel` or `place` would. (`report_window_minutes` is also how long the bot
+keeps listening after the emission window: too short, and a large multi-hop mesh
+doesn't get to finish propagating before the report is written.)
 
 This isn't based on how many stations are actually testing, on purpose: that number
 can't be known reliably (someone in a quiet spot and someone in the middle of a dense
 city could both be testing alongside 100 others, and neither could tell that from their
 own radio), and a check that depends on every participant correctly entering it would
-only be as good as the least careful one. A flat cap on `message_count` and a flat floor on
-`listen_minutes` need nothing to be coordinated beyond what already has to be agreed for
-people to hear each other at all (`channel`, `weekday`, `start_time`) — they just keep
-any single random-schedule session, run by anyone, out of the range where it risks
-flooding the channel regardless of how many others join in.
+only be as good as the least careful one. Flat caps and floors need nothing to be
+coordinated beyond what already has to be agreed for people to hear each other at all
+(`channel`, `weekday`, `start_time`) — they just keep any single random-schedule
+session, run by anyone, out of the range where it risks flooding the channel regardless
+of how many others join in.
 
-`random_schedule = false` (`--fixed-schedule`) is exempt from both: it's meant for a
+`random_schedule = false` (`--fixed-schedule`) is exempt from all three: it's meant for a
 single operator's own controlled testing (see [Tests](#tests) below), not a shared
 session with an unknown number of participants.
 
@@ -324,8 +327,8 @@ session with an unknown number of participants.
 - **What can still be lost:** only whatever the radio transmits while the connection
   is down, usually around 1 second. If there are outages, the report says how many
   there were and how much time they added up to.
-- **Two of our messages are never closer than `min_gap_seconds`**, even across a
-  connection outage.
+- **Two of our messages are never closer than 2 minutes** (fixed, not configurable),
+  even across a connection outage.
 - The bot depends on the packets' fields and on the library's reconnection behaviour,
   so `requirements.txt` pins its version. Only bump it after testing.
 - The report stays in a file: it isn't sent anywhere. A future version may let you opt
@@ -406,9 +409,7 @@ start_time = <~5 minutes from now, HH:MM>
 listen_minutes = 12
 message_count = 3
 random_schedule = false
-min_gap_seconds = 60
 report_window_minutes = 4
-wake_before_minutes = 2
 ```
 
 `random_schedule = false` here only so this demo stays short: with it on, the emission

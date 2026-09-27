@@ -77,11 +77,19 @@ MAX_TEXT_BYTES = 200  # a Meshtastic text message holds about this much
 MIN_EPOCH = 1_000_000_000  # a packet time below this (2001) is not a real clock reading
 MAX_RANDOM_COUNT = 5  # with random_schedule, more than this needs --fixed-schedule
 MIN_RANDOM_LISTEN_MINUTES = 120.0  # with random_schedule, less than this needs --fixed-schedule
-# Both exist because LoRa has no real collision avoidance: with many participants spread
-# across random_schedule's shared window, a high count or a short window risks flooding
-# the channel with everyone's messages at once -- exactly the congestion a range test is
-# meant to measure. --fixed-schedule is for a single operator's own controlled testing
-# (see the README) and is exempt from both.
+MIN_RANDOM_REPORT_WINDOW_MINUTES = 60.0  # with random_schedule, less than this needs --fixed-schedule
+# All three exist because LoRa has no real collision avoidance: with many participants
+# spread across random_schedule's shared window, a high message_count, a short emission
+# window or a short report window (which is also how long the bot keeps listening for
+# stragglers) risks flooding the channel or undercounting a large, multi-hop mesh.
+# --fixed-schedule is for a single operator's own controlled testing (see the README)
+# and is exempt from all three.
+
+# Not configurable on purpose: knobs that protect the bot from itself, not settings a
+# deployment should need to tune.
+MIN_GAP_SECONDS = 120.0  # never two of our own messages closer than this
+SESSION_TOLERANCE_SECONDS = 60.0  # how long before the session started still counts (see Heard)
+WAKE_BEFORE_MINUTES = 2.0  # --schedule: connect this early to check the radio
 
 def _load_defaults():
     """The bot's own default settings: defaults.ini, shipped next to this script (and
@@ -149,7 +157,6 @@ def load_config(argv):
     ap.add_argument("--start-time", dest="start_time", help="HH:MM in --timezone")
     ap.add_argument("--timezone", help="IANA zone start-time refers to, e.g. Europe/Lisbon")
     ap.add_argument("--weekday", help="day of the session (--schedule), or 'daily'")
-    ap.add_argument("--min-gap", dest="min_gap_seconds", help="seconds between two of our messages, at least")
     ap.add_argument("--report-window-minutes", dest="report_window_minutes",
                     help="report at a random moment this many minutes after the emission window")
     ap.add_argument("--fixed-schedule", action="store_true",
@@ -207,10 +214,10 @@ def load_config(argv):
     cfg["message_count"] = int(cfg["message_count"])
     cfg["interval_minutes"] = float(cfg["interval_minutes"])
     cfg["listen_minutes"] = float(cfg["listen_minutes"])
-    cfg["wake_before_minutes"] = float(cfg["wake_before_minutes"])
     if args.fixed_schedule:
         cfg["random_schedule"], cfg["report_window_minutes"] = "false", "0"
     cfg["random_schedule"] = cfg["random_schedule"].strip().lower() in ("1", "true", "yes", "sim")
+    cfg["report_window_minutes"] = float(cfg["report_window_minutes"])
     if cfg["random_schedule"]:
         if cfg["message_count"] > MAX_RANDOM_COUNT:
             sys.exit("`message_count` above %d needs --fixed-schedule: with random_schedule, many "
@@ -220,9 +227,15 @@ def load_config(argv):
             sys.exit("`listen_minutes` below %g needs --fixed-schedule: with random_schedule, many "
                      "participants in a short window risks flooding the channel: %r"
                      % (MIN_RANDOM_LISTEN_MINUTES, cfg["listen_minutes"]))
-    cfg["min_gap_seconds"] = float(cfg["min_gap_seconds"])
-    cfg["session_tolerance_seconds"] = float(cfg["session_tolerance_seconds"])
-    cfg["report_window_minutes"] = float(cfg["report_window_minutes"])
+        if cfg["report_window_minutes"] < MIN_RANDOM_REPORT_WINDOW_MINUTES:
+            sys.exit("`report_window_minutes` below %g needs --fixed-schedule: with random_schedule, a "
+                     "large multi-hop mesh needs more time to finish propagating before the report is "
+                     "written, or stragglers are undercounted: %r"
+                     % (MIN_RANDOM_REPORT_WINDOW_MINUTES, cfg["report_window_minutes"]))
+    # Not configurable: see the comment where these are defined.
+    cfg["min_gap_seconds"] = MIN_GAP_SECONDS
+    cfg["session_tolerance_seconds"] = SESSION_TOLERANCE_SECONDS
+    cfg["wake_before_minutes"] = WAKE_BEFORE_MINUTES
     try:
         cfg["tz"] = ZoneInfo(cfg["timezone"])
     except Exception:
