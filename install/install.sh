@@ -86,7 +86,7 @@ fetch env.example "$DIR/env.example"
     say "MTBOT_PLACE='$MTBOT_PLACE'"
 } > "$DIR/.env"
 say "Done: configuration in $DIR/.env"
-say "Schedule: every ${MTBOT_WEEKDAY:-saturday} at ${MTBOT_START_TIME:-21:00} (${MTBOT_TIMEZONE:-Europe/Lisbon})."
+say "Schedule: every ${MTBOT_WEEKDAY:-saturday} at ${MTBOT_START_TIME:-06:00} (${MTBOT_TIMEZONE:-Europe/Lisbon})."
 say "  To change it, add MTBOT_WEEKDAY / MTBOT_START_TIME / MTBOT_TIMEZONE to $DIR/.env (see env.example)."
 
 if [ "${MTB_SKIP_START:-}" = 1 ]; then
