@@ -46,9 +46,9 @@ Each session writes two files in the configuration folder:
 
 ```
 Session 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
-node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place | via | note
-!cafef00d | CD34 | LONG_FAST | 2/3 | 1 | 0 | 5.3 | -96 | Villatown | RF | direct
-!0a1b2c3d | EF56 | LONG_FAST | 3/3 | 0 | 1-2 | -2.5 | -112 | Valley | RF | relay 0xe9
+node      | name | mode      | received | duplicates | hops | avg SNR | avg RSSI | place     | via | note
+!cafef00d | CD34 | LONG_FAST | 2/3      | 1          | 0    | 5.3     | -96      | Villatown | RF  | direct
+!0a1b2c3d | EF56 | LONG_FAST | 3/3      | 0          | 1-2  | -2.5    | -112     | Valley    | RF  | relay 0xe9
 ```
 
 **`report.jsonl`**, one JSON line per session (the same content, for machines, and the

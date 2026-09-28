@@ -465,9 +465,21 @@ class ReportTest(unittest.TestCase):
         self.h.feed_packet(packet(1002, "MTBOT NARROW_FAST | Vale | 1/3", mqtt=True))
         lines = bot.render_text(self.report()).splitlines()
         self.assertIn("Reporter: ME01 (!deadbeef) | Place: Lisboa | Mode: LONG_FAST | Channel: 2 (Test_Channel) | Sent: 1/1", lines[0])
-        self.assertEqual(lines[1], "node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place | via | note")
-        self.assertEqual(lines[2], "!000003e9 | AB12 | LONG_FAST | 1/3 | 0 | 0 | 4.5 | -98 | Vila Nova | RF | direct")
-        self.assertTrue(lines[3].startswith("!000003ea | CD34 | NARROW_FAST (≠ LONG_FAST) | 1/3 | 0 | 0 | - | - | Vale | MQTT (does not confirm RF)"))
+
+        header, row1, row2 = (line.split(" | ") for line in lines[1:4])
+        columns = ["node", "name", "mode", "received", "duplicates", "hops", "avg SNR", "avg RSSI", "place", "via", "note"]
+        self.assertEqual([c.strip() for c in header], columns)
+        self.assertEqual([c.strip() for c in row1],
+                         ["!000003e9", "AB12", "LONG_FAST", "1/3", "0", "0", "4.5", "-98", "Vila Nova", "RF", "direct"])
+        self.assertEqual([c.strip() for c in row2],
+                         ["!000003ea", "CD34", "NARROW_FAST (≠ LONG_FAST)", "1/3", "0", "0", "-", "-", "Vale",
+                          "MQTT (does not confirm RF)", "direct"])
+
+        # Every column (but the free-form last one, never padded) lines up: its "|"
+        # falls at the same character position on every row.
+        for i in range(len(columns) - 1):
+            widths = {len(line.split(" | ")[i]) for line in lines[1:4]}
+            self.assertEqual(len(widths), 1, "column %r not aligned: %r" % (columns[i], widths))
 
     def test_nothing_heard(self):
         self.assertIn("(no messages received)", bot.render_text(self.report()))
@@ -798,7 +810,8 @@ class SessionTest(unittest.TestCase):
 
         self.assertEqual(iface.sent, [("MTBOT LONG_FAST | Lisboa | 1/1", 2, False)])
         text = open(cfg["report_file"], encoding="utf-8").read()
-        self.assertIn("!000003ea | CD34 | LONG_FAST | 1/3 | 0 | 0 | 4.5 | -98 | Vila Alta | RF", text)
+        self.assertIn("!000003ea", text)
+        self.assertIn("Vila Alta | RF", text)
         lines = open(cfg["report_json_file"], encoding="utf-8").read().splitlines()
         self.assertEqual(len(lines), 1)  # one JSON object per session
         rep = json.loads(lines[0])

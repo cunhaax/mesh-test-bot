@@ -456,8 +456,10 @@ def _num(value, fmt="%s"):
 
 
 def render_text(rep):
-    """A readable version of the report: a header, then one line per station with
-    its fields separated by " | "."""
+    """A readable version of the report: a header, then one line per station, as a
+    plain-text table with its columns padded to line up in a monospace view (a fixed
+    " | " would only align by coincidence). The last column (free-form notes) is left
+    unpadded, so no line carries trailing whitespace."""
     r, s, ra = rep["reporter"], rep["session"], rep["radio"]
     ok = sum(1 for m in rep["sent"] if m["ok"])
     lines = ["Session %s → %s | Reporter: %s (%s) | Place: %s | Mode: %s | Channel: %s%s | Sent: %d/%d" % (
@@ -466,15 +468,17 @@ def render_text(rep):
     if not rep["heard"]:
         lines.append("(no messages received)")
     else:
-        lines.append("node | name | mode | received | duplicates | hops | avg SNR | avg RSSI | place | via | note")
-    for e in rep["heard"]:
-        hops = "-" if e["hops_min"] is None else (
-            str(e["hops_min"]) if e["hops_min"] == e["hops_max"] else "%d-%d" % (e["hops_min"], e["hops_max"]))
-        mode = "/".join(e["mode_tags"]) + ("" if e["mode_match"] is not False else " (≠ %s)" % ra["mode"])
-        note = "; ".join(x for x in (e["relay"], "+%d MQTT copies" % e["mqtt_copies"] if e["mqtt_copies"] else "") if x)
-        lines.append(" | ".join([e["node"], e["name"], mode, "%d/%s" % (e["received"], e["of"] or "?"),
-                                 str(e["duplicates"]), hops, _num(e["snr_avg"]), _num(e["rssi_avg"], "%.0f"),
-                                 e["place"], "RF" if e["path"] == "rf" else "MQTT (does not confirm RF)", note]))
+        rows = [["node", "name", "mode", "received", "duplicates", "hops", "avg SNR", "avg RSSI", "place", "via", "note"]]
+        for e in rep["heard"]:
+            hops = "-" if e["hops_min"] is None else (
+                str(e["hops_min"]) if e["hops_min"] == e["hops_max"] else "%d-%d" % (e["hops_min"], e["hops_max"]))
+            mode = "/".join(e["mode_tags"]) + ("" if e["mode_match"] is not False else " (≠ %s)" % ra["mode"])
+            note = "; ".join(x for x in (e["relay"], "+%d MQTT copies" % e["mqtt_copies"] if e["mqtt_copies"] else "") if x)
+            rows.append([e["node"], e["name"], mode, "%d/%s" % (e["received"], e["of"] or "?"),
+                        str(e["duplicates"]), hops, _num(e["snr_avg"]), _num(e["rssi_avg"], "%.0f"),
+                        e["place"], "RF" if e["path"] == "rf" else "MQTT (does not confirm RF)", note])
+        widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)]
+        lines.extend(" | ".join(cell.ljust(w) for cell, w in zip(row[:-1], widths)) + " | " + row[-1] for row in rows)
     if rep["outages"]["count"]:
         lines.append("warning: the connection to the radio was interrupted %d time(s), ~%d s total; messages in "
                      "that interval may have been lost" % (rep["outages"]["count"], rep["outages"]["total_s"]))
