@@ -112,6 +112,14 @@ STARTUP_CHECK_BACKOFF_CAP_SECONDS = 60.0  # --schedule: retry delay never grows 
 # startup_check_seconds of that before giving up, the remainder left to wait for here is at
 # most ~157s.
 STARTUP_CHECK_JOIN_SECONDS = 170.0
+# --schedule: once a probe actually reaches the radio (whether the channel matches or not),
+# wait this long before closing it. The meshtastic library fires its first heartbeat send
+# SYNCHRONOUSLY, from its own reader thread, the instant the config handshake completes --
+# racing our own close() right after. Losing that race closes the socket out from under the
+# library's send and produces a harmless but noisy BrokenPipeError traceback (observed against
+# a real radio; a local/loopback connect is fast enough that our own thread doesn't usually win
+# that race). This does not fully eliminate the race, just makes losing it very unlikely.
+STARTUP_CHECK_CLOSE_DELAY_SECONDS = 1.0
 
 def _load_defaults():
     """The bot's own default settings: defaults.ini, shipped next to this script (and
@@ -270,6 +278,7 @@ def load_config(argv):
     cfg["startup_check_backoff_seconds"] = STARTUP_CHECK_BACKOFF_SECONDS
     cfg["startup_check_backoff_cap_seconds"] = STARTUP_CHECK_BACKOFF_CAP_SECONDS
     cfg["startup_check_join_seconds"] = STARTUP_CHECK_JOIN_SECONDS
+    cfg["startup_check_close_delay_seconds"] = STARTUP_CHECK_CLOSE_DELAY_SECONDS
     try:
         cfg["tz"] = ZoneInfo(cfg["timezone"])
     except Exception:
@@ -584,6 +593,7 @@ class Radio:
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._connecting = threading.Event()  # set only while blocked inside self._factory(...)
+        self._ever_connected = threading.Event()  # set once self._factory(...) has ever returned
         self._thread = None
         self._subscribed = False
 
@@ -657,6 +667,12 @@ class Radio:
         the thread is merely idling in its healthy loop or its retry backoff."""
         return self._connecting.is_set()
 
+    def ever_connected(self):
+        """Whether `factory` has ever returned successfully -- i.e. a real protocol-level
+        connection to the radio was made at some point, whether or not the channel then
+        turned out to match. See STARTUP_CHECK_CLOSE_DELAY_SECONDS for why this matters."""
+        return self._ever_connected.is_set()
+
     def wait_ready(self, timeout):
         """True once connected (and the channel is the expected one)."""
         end = time.time() + timeout
@@ -725,6 +741,7 @@ class Radio:
             iface = self._factory(self.cfg["host"], self.cfg["port"])
         finally:
             self._connecting.clear()
+        self._ever_connected.set()  # factory succeeded: a real connection was made, whatever follows
         try:
             if self._stop.is_set():  # the session ended while we were connecting
                 raise RadioError("session ended")
@@ -945,6 +962,11 @@ def check_radio(cfg, factory=None, timeout=None):
     finally:
         if radio.connect_in_flight():
             log.info("Startup check: waiting for a pending connection attempt to finish before continuing...")
+        elif radio.ever_connected():
+            # Let the library's own synchronous first-heartbeat send (fired the instant the
+            # config handshake completed, from its own reader thread) finish before we close
+            # the socket out from under it -- see STARTUP_CHECK_CLOSE_DELAY_SECONDS.
+            time.sleep(cfg["startup_check_close_delay_seconds"])
         radio.close(join_timeout=cfg["startup_check_join_seconds"])
         if radio.supervisor_alive():
             # STARTUP_CHECK_JOIN_SECONDS is generous for a single-address host (true for
