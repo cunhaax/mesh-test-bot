@@ -186,10 +186,12 @@ docker compose down                         # stop
 - To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
 - **At startup**, the bot briefly connects to the radio to check it's reachable and on
   the right channel: `Startup check OK` in the log means it's set up correctly. If it
-  can't connect, it retries for a few minutes, then exits -- so the container keeps
-  restarting (`docker ps` shows `Restarting`) until the setup is fixed, instead of
-  waiting quietly for the first scheduled session. `docker compose logs` says what's
-  wrong (usually the host/port in `.env`, or the radio being unreachable).
+  can't connect, it retries for a few minutes, then exits and the container restarts
+  (each cycle takes a few minutes, so `docker ps` usually shows `Up` with a low uptime
+  rather than `Restarting`; `docker inspect -f '{{.RestartCount}}' mesh-test-bot` climbing
+  is a clearer sign) until the setup is fixed, instead of waiting quietly for the first
+  scheduled session. `docker compose logs` says what's wrong (usually the host/port in
+  `.env`, or the radio being unreachable).
 - Every option can go in `.env` too, as `MTBOT_<NAME>`: see
   [`defaults.ini`](defaults.ini) for the full list and what each one does.
 
@@ -248,6 +250,13 @@ python3 mesh_test_bot.py --now             # or: one session right away
 ```
 
 Instead of `--schedule` you can use the system's cron.
+
+**Run `--schedule` under a process supervisor** (systemd with `Restart=on-failure`, for
+example), not bare in a terminal or a plain `nohup`/nightly cron `@reboot` line: if the
+radio is unreachable at startup, the bot retries for a few minutes and then **exits**
+(see [After installing](#after-installing) above) -- without a supervisor to restart it,
+the scheduler is simply gone until someone notices. The Docker image already has this
+covered (`restart: unless-stopped`).
 
 ## With MeshMonitor (optional)
 

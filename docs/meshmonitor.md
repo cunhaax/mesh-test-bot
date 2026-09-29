@@ -36,11 +36,13 @@ opening any connection to the radio).
 3. Open `http://localhost:8080`, log in with `admin` / `changeme` and **change the
    password** (click the username, *Change Password*).
 4. **Enable the Virtual Node** (next step).
-5. `docker compose -f with-meshmonitor.yml up -d bot`. Starting the bot only now
-   matters: at startup it briefly connects to check the radio is reachable, retrying
-   for a few minutes and then **exiting** if it never can -- which is what happens on
-   every restart while the Virtual Node isn't enabled yet. If you start both services
-   together instead, just `docker compose -f with-meshmonitor.yml restart bot` once
+5. `docker compose -f with-meshmonitor.yml up -d bot`. At startup the bot briefly
+   connects to check the radio is reachable, retrying for a few minutes and then
+   **exiting** if it never can -- which is what happens on every restart while the
+   Virtual Node isn't enabled yet. Starting it only now just avoids that pointless
+   restart cycle (its own `restart: unless-stopped` recovers either way, within a few
+   minutes). If you start both services together instead, just
+   `docker compose -f with-meshmonitor.yml restart bot` once
    the Virtual Node is on.
 
 ## Enabling the Virtual Node
