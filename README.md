@@ -255,8 +255,8 @@ Instead of `--schedule` you can use the system's cron.
 example), not bare in a terminal or a plain `nohup`/cron `@reboot` line: if the
 radio is unreachable at startup, the bot retries for a few minutes and then **exits**
 (see [After installing](#after-installing) above) -- without a supervisor to restart it,
-the scheduler is simply gone until someone notices. The Docker image already has this
-covered (`restart: unless-stopped`).
+the scheduler is simply gone until someone notices. The Docker Compose setup already has
+this covered (`restart: unless-stopped`).
 
 ## With MeshMonitor (optional)
 

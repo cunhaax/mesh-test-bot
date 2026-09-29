@@ -855,8 +855,8 @@ class CheckRadioTest(unittest.TestCase):
         original_close = bot.Radio.close
         seen = {}
         # Deliberately NOT Radio.close's own default (5.0), so this actually distinguishes
-        # "check_radio passed our long join_timeout through" from "it fell back to close()'s
-        # ordinary default" -- the exact regression FAIL 2 of the second review round caught.
+        # "check_radio passed our long join_timeout through" from "it silently fell back to
+        # close()'s ordinary default".
         self.cfg["startup_check_join_seconds"] = 7.0
 
         def close_and_release(self, join_timeout=5.0):
@@ -875,7 +875,8 @@ class CheckRadioTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         warn.assert_not_called()
         self.assertTrue(any("waiting for a pending" in m for m in cm.output))  # the in-flight INFO heads-up
-        # the actual FAIL-1 guarantee: the long join was used, and really waited the thread out
+        # the guarantee this test exists to prove: the long join was used, and really waited
+        # the thread out, so it can never straggle into a later attempt or the session
         self.assertEqual(seen["join_timeout"], 7.0)
         self.assertFalse(seen["thread"].is_alive())
         self.assertTrue(ifaces and ifaces[0].closed)  # the late connection was torn down, not left dangling
@@ -1023,7 +1024,7 @@ class StartupCheckRetryPolicyTest(unittest.TestCase):
         datetime_patcher = mock.patch.object(bot, "datetime", SimpleNamespace(now=lambda tz: self.now))
         datetime_patcher.start()
         self.addCleanup(datetime_patcher.stop)
-        self.wake = self.now + timedelta(minutes=10)  # far enough away that AC-7's skip never triggers
+        self.wake = self.now + timedelta(minutes=10)  # far enough away that the too-close-to-the-session skip never triggers
 
     def test_the_backoff_sequence_doubles_and_is_capped(self):
         with mock.patch.object(bot, "check_radio", side_effect=[False] * 6 + [True]):
