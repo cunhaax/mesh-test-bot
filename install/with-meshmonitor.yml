@@ -3,10 +3,16 @@
 # Full guide: docs/meshmonitor.md
 #
 #   1. Change the 5 lines marked "<-- change".
-#   2. docker compose -f with-meshmonitor.yml up -d
+#   2. docker compose -f with-meshmonitor.yml up -d meshmonitor
 #   3. Open http://localhost:8080 (admin / changeme), change the password and enable the
-#      Virtual Node on the source (the guide says how). Until then the bot keeps retrying,
-#      which is fine.
+#      Virtual Node on the source (the guide says how).
+#   4. docker compose -f with-meshmonitor.yml up -d bot
+#
+# Starting the bot only after the Virtual Node is enabled matters: at startup the bot
+# briefly connects to check the radio is reachable, retrying for a few minutes and then
+# exiting (so it restarts under "restart: unless-stopped") if it never can -- which is
+# what happens on every restart before step 3 is done. Do step 3 first, or just restart
+# the bot container afterwards (`docker compose -f with-meshmonitor.yml restart bot`).
 services:
   meshmonitor:
     image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1

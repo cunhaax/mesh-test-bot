@@ -44,7 +44,11 @@ whatever the machine's own zone is: someone in the Azores keeps the same
 `start_time` and the script converts.
 
 `--schedule` keeps the process running and repeats the session every `weekday`
-at `start_time` (this is what the Docker image does).
+at `start_time` (this is what the Docker image does). At startup it also briefly
+connects to the radio once, to check it is reachable and on the right channel --
+retrying with backoff for a few minutes and then exiting if it never answers --
+so a wrong IP or a channel mismatch is caught right away, not only when the
+first session opens, potentially days later.
 
 Config: bot.ini next to this script (or --config). Every option can also come from
 an environment variable MTBOT_<NAME> (e.g. MTBOT_PLACE) and from a command-line flag
@@ -90,6 +94,17 @@ MIN_RANDOM_REPORT_WINDOW_MINUTES = 60.0  # with random_schedule, less than this 
 MIN_GAP_SECONDS = 120.0  # never two of our own messages closer than this
 SESSION_TOLERANCE_SECONDS = 60.0  # how long before the session started still counts (see Heard)
 WAKE_BEFORE_MINUTES = 2.0  # --schedule: connect this early to check the radio
+STARTUP_CHECK_SECONDS = 60.0  # --schedule: timeout of each startup connectivity probe attempt
+# --schedule: give up retrying the startup probe after this many minutes and exit; also the
+# threshold under which the probe is skipped entirely, since the session's own connection
+# (which happens WAKE_BEFORE_MINUTES before start) is then close enough to act as the check
+# itself. A probe connection that hangs can live up to ~60s (our own timeout) + ~127s (the
+# Linux default TCP SYN timeout -- the library's socket.create_connection has none of its own)
+# + 30s (the library's config wait) =~ 217s before it is fully closed, comfortably under this
+# window, so even a final attempt that finishes late cannot overlap the session's connection
+# on the radio's single TCP client slot.
+STARTUP_CHECK_MIN_LEAD_MINUTES = 5.0
+STARTUP_CHECK_BACKOFF_SECONDS = 5.0  # --schedule: first retry delay after a failed probe, doubling, capped at 60s
 
 def _load_defaults():
     """The bot's own default settings: defaults.ini, shipped next to this script (and
@@ -243,6 +258,9 @@ def load_config(argv):
     cfg["min_gap_seconds"] = MIN_GAP_SECONDS
     cfg["session_tolerance_seconds"] = SESSION_TOLERANCE_SECONDS
     cfg["wake_before_minutes"] = WAKE_BEFORE_MINUTES
+    cfg["startup_check_seconds"] = STARTUP_CHECK_SECONDS
+    cfg["startup_check_min_lead_minutes"] = STARTUP_CHECK_MIN_LEAD_MINUTES
+    cfg["startup_check_backoff_seconds"] = STARTUP_CHECK_BACKOFF_SECONDS
     try:
         cfg["tz"] = ZoneInfo(cfg["timezone"])
     except Exception:
@@ -546,6 +564,7 @@ class Radio:
         self.heard = None
         self.lora = None  # the radio's LoRa settings, read on connect
         self.fatal = None  # message of an error that retrying cannot fix
+        self.last_error = None  # str(exception) of the latest failed connection attempt
         self.outages = []  # seconds of each period without connection
         self._names = {}  # node number -> short name
         self._my_num = None
@@ -584,14 +603,18 @@ class Radio:
         return list(self._names)
 
     # --- connection ----------------------------------------------------------
-    def start(self, heard):
+    def start(self, heard=None):
+        """`heard=None` is a bare connectivity probe: it connects and checks the channel like
+        a real session, but never subscribes to messages, so nothing the radio hands over on
+        connect is written to rx_file or counted (see check_radio)."""
         self.heard = heard
-        try:
-            from pubsub import pub  # comes with meshtastic
-            pub.subscribe(self._on_receive, "meshtastic.receive")
-            self._subscribed = True
-        except ImportError:
-            pass  # fake factories in tests deliver packets by calling _on_receive
+        if heard is not None:
+            try:
+                from pubsub import pub  # comes with meshtastic
+                pub.subscribe(self._on_receive, "meshtastic.receive")
+                self._subscribed = True
+            except ImportError:
+                pass  # fake factories in tests deliver packets by calling _on_receive
         self._thread = threading.Thread(target=self._supervise, daemon=True, name="radio supervisor")
         self._thread.start()
 
@@ -717,12 +740,16 @@ class Radio:
             try:
                 self._connect()
             except RadioError as e:
+                if self._stop.is_set():  # close() was called while _connect was still in flight:
+                    return             # a probe that finished late is not a real failure to report
                 self.fatal = str(e)
                 log.error("%s", e)
                 return
             except Exception as e:
-                log.warning("No connection to the radio (%s: %s); retrying in %.0fs",
-                            type(e).__name__, e, backoff)
+                if self._stop.is_set():
+                    return
+                self.last_error = "%s: %s" % (type(e).__name__, e)
+                log.warning("No connection to the radio (%s); retrying in %.0fs", self.last_error, backoff)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 30.0)
             else:
@@ -844,6 +871,40 @@ def sleep_until(when, radio):
         time.sleep(min(left, 1.0))
 
 
+def check_radio(cfg, factory=None, timeout=None):
+    """One connectivity probe: connect to the configured radio, check the channel, then
+    disconnect -- exactly what the session's own connection does, minus listening (no
+    `heard`, so nothing the radio hands over on connect is written to rx_file). Logs the
+    result and returns True (reachable), False (unreachable -- worth retrying) or None (a
+    channel mismatch -- retrying cannot fix it). Used by `schedule()` at startup, so a wrong
+    host/port/channel is caught within about a minute instead of only at the next session."""
+    host, port, timeout = cfg["host"], cfg["port"], timeout or cfg["startup_check_seconds"]
+    log.info("Startup check: connecting to the radio at %s:%s...", host, port)
+    radio = Radio(cfg, factory)
+    try:
+        radio.start()
+        ok = radio.wait_ready(timeout)
+    except Exception as e:
+        log.exception("Startup check FAILED: unexpected error (%s: %s).", type(e).__name__, e)
+        return False
+    finally:
+        radio.close()  # always release the radio's single TCP client slot, even on KeyboardInterrupt
+    if ok and not radio.fatal:
+        log.info("Startup check OK: radio at %s:%s answered (node !%08x, mode %s; channel name %s).",
+                 host, port, radio.my_num or 0, radio.mode,
+                 "confirmed" if cfg["channel_name"] else "not checked (channel_name is empty)")
+        return True
+    if radio.fatal:
+        log.error("Startup check FAILED: %s Check MTBOT_CHANNEL/MTBOT_CHANNEL_NAME.", radio.fatal)
+        return None
+    reason = radio.last_error or "no answer within %.0fs" % timeout
+    log.error("Startup check FAILED: no connection to the radio at %s:%s within %.0fs (%s). Check host/port "
+             "(MTBOT_HOST/MTBOT_PORT -- inside Docker use the radio's IP, not a .local name) and that the "
+             "radio is on and reachable from this machine. With MeshMonitor: check it is connected to the "
+             "radio and the Virtual Node is enabled.", host, port, timeout, reason)
+    return False
+
+
 def run_window(cfg, start, end, dry_run=False, factory=None):
     """One session: connect, listen from `start`, send our messages at planned
     moments, then write the report at a random moment after `end`."""
@@ -891,10 +952,43 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
     print(text, flush=True)
 
 
-def schedule(cfg, dry_run=False):
+def _startup_check(cfg, factory, wake):
+    """Probe the radio once at process start (see check_radio), retrying on exponential
+    backoff until it succeeds or `startup_check_min_lead_minutes` runs out -- past that
+    point the session's own connection (WAKE_BEFORE_MINUTES before start) is close enough
+    to act as the check by itself, so the probe is skipped instead. A channel mismatch is
+    not retried (it cannot fix itself); an unreachable radio that never answers in time
+    ends the process, so a broken setup is loud (a restarting container), not a silent
+    wait for the next session."""
+    lead = timedelta(minutes=cfg["startup_check_min_lead_minutes"])
+    if wake - datetime.now(cfg["tz"]) < lead:
+        log.info("Startup check skipped: the session connects to the radio in under %.0f min anyway.",
+                 cfg["startup_check_min_lead_minutes"])
+        return
+    deadline = datetime.now(cfg["tz"]) + lead
+    delay = cfg["startup_check_backoff_seconds"]
+    while True:
+        result = check_radio(cfg, factory)
+        if result:
+            return
+        if result is None:  # channel mismatch: will not fix itself
+            sys.exit(1)
+        remaining = (deadline - datetime.now(cfg["tz"])).total_seconds()
+        if remaining <= 0:
+            log.error("Startup check: giving up after %.0f min with no answer; exiting.",
+                     cfg["startup_check_min_lead_minutes"])
+            sys.exit(1)
+        wait = min(delay, remaining)
+        log.error("Startup check: retrying in %.0fs.", wait)
+        time.sleep(wait)
+        delay = min(delay * 2, 60.0)
+
+
+def schedule(cfg, dry_run=False, factory=None):
     """Run a session every configured weekday, forever. A failed session is
     logged and the loop carries on with the next one."""
     after = datetime.now(cfg["tz"])
+    checked = False
     while True:
         start, end = next_window(cfg, after)
         wake = start - timedelta(minutes=cfg["wake_before_minutes"])
@@ -903,13 +997,16 @@ def schedule(cfg, dry_run=False):
         if dry_run:
             run_window(cfg, max(start, datetime.now(cfg["tz"])), end, dry_run=True)
             return
+        if not checked:
+            checked = True
+            _startup_check(cfg, factory, wake)
         while True:  # short sleeps: robust to clock and DST changes
             wait = (wake - datetime.now(cfg["tz"])).total_seconds()
             if wait <= 0:
                 break
             time.sleep(min(wait, 60))
         try:
-            run_window(cfg, max(start, datetime.now(cfg["tz"])), end)
+            run_window(cfg, max(start, datetime.now(cfg["tz"])), end, factory=factory)
         except SystemExit as e:
             log.error("Session aborted: %s", e)
         except Exception:

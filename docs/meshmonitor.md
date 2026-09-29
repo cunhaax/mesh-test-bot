@@ -31,11 +31,17 @@ opening any connection to the radio).
 1. Download [`install/with-meshmonitor.yml`](../install/with-meshmonitor.yml) into a
    folder and edit the 5 lines marked `<-- change` (the radio's IP, and the bot's
    channel, channel name and place).
-2. `docker compose -f with-meshmonitor.yml up -d`
+2. `docker compose -f with-meshmonitor.yml up -d meshmonitor` (just MeshMonitor first,
+   not the bot yet).
 3. Open `http://localhost:8080`, log in with `admin` / `changeme` and **change the
    password** (click the username, *Change Password*).
-4. **Enable the Virtual Node** (next step). Until you do, the bot keeps trying to
-   connect and transmits nothing.
+4. **Enable the Virtual Node** (next step).
+5. `docker compose -f with-meshmonitor.yml up -d bot`. Starting the bot only now
+   matters: at startup it briefly connects to check the radio is reachable, retrying
+   for a few minutes and then **exiting** if it never can -- which is what happens on
+   every restart while the Virtual Node isn't enabled yet. If you start both services
+   together instead, just `docker compose -f with-meshmonitor.yml restart bot` once
+   the Virtual Node is on.
 
 ## Enabling the Virtual Node
 
@@ -63,8 +69,15 @@ MeshMonitor's log then shows `Virtual node server listening on port 4404`.
 
 ## Verifying
 
-- `docker compose -f with-meshmonitor.yml logs bot` should show `Connected to radio
-  meshmonitor:4404 (node …, N known nodes, mode …)`.
+- `docker compose -f with-meshmonitor.yml logs bot` should show `Startup check OK:
+  radio at meshmonitor:4404 answered (node …, mode …; channel name …)` within about a
+  minute of starting the bot. If instead you see `Startup check FAILED` repeating and
+  then the bot exiting, the Virtual Node likely isn't enabled yet (or MeshMonitor isn't
+  connected to the radio) -- fix that and `docker compose -f with-meshmonitor.yml
+  restart bot`.
+- Later, at the session itself, the log shows `Connected to radio meshmonitor:4404
+  (node …, N known nodes, mode …)` again -- that's the session's own connection, a
+  separate one from the startup check.
 - In the UI (*Messages*) you see the messages the bot sends, as its own node's
   messages, and the ones arriving from others.
 
