@@ -820,6 +820,9 @@ class CheckRadioTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(ifaces[0].closed)
         self.assertTrue(any("Startup check OK" in m and "x:4403" in m and "!0000270f" in m for m in cm.output))
+        # the supervisor thread stays alive (idling in its healthy loop) after a success --
+        # that must not be confused with a still-in-flight connect attempt (connect_in_flight)
+        self.assertFalse(any("waiting for a pending" in m for m in cm.output))
 
     def test_an_unreachable_radio_fails_naming_host_port_and_the_underlying_error(self):
         def factory(host, port):
@@ -851,6 +854,10 @@ class CheckRadioTest(unittest.TestCase):
 
         original_close = bot.Radio.close
         seen = {}
+        # Deliberately NOT Radio.close's own default (5.0), so this actually distinguishes
+        # "check_radio passed our long join_timeout through" from "it fell back to close()'s
+        # ordinary default" -- the exact regression FAIL 2 of the second review round caught.
+        self.cfg["startup_check_join_seconds"] = 7.0
 
         def close_and_release(self, join_timeout=5.0):
             seen["join_timeout"] = join_timeout
@@ -858,17 +865,18 @@ class CheckRadioTest(unittest.TestCase):
             self._stop.set()
             release.set()
             original_close(self, join_timeout)
-        self.cfg["startup_check_join_seconds"] = 5.0
         with mock.patch.object(bot.log, "warning") as warn, mock.patch.object(bot.Radio, "close", close_and_release):
-            with self.assertLogs("bot", "ERROR") as cm:
+            with self.assertLogs("bot") as cm:
                 ok = bot.check_radio(self.cfg, factory, timeout=0.3)
         self.assertIs(ok, False)
-        self.assertIn("no answer", cm.output[-1])
-        # no spurious log from the late-finishing RadioError("session ended") path (:757-758)
-        self.assertEqual(len(cm.output), 1)
+        errors = [m for m in cm.output if m.startswith("ERROR:")]
+        self.assertIn("no answer", errors[-1])
+        # no spurious log from the late-finishing RadioError("session ended") path in _supervise
+        self.assertEqual(len(errors), 1)
         warn.assert_not_called()
+        self.assertTrue(any("waiting for a pending" in m for m in cm.output))  # the in-flight INFO heads-up
         # the actual FAIL-1 guarantee: the long join was used, and really waited the thread out
-        self.assertEqual(seen["join_timeout"], self.cfg["startup_check_join_seconds"])
+        self.assertEqual(seen["join_timeout"], 7.0)
         self.assertFalse(seen["thread"].is_alive())
         self.assertTrue(ifaces and ifaces[0].closed)  # the late connection was torn down, not left dangling
 
@@ -1007,7 +1015,9 @@ class StartupCheckRetryPolicyTest(unittest.TestCase):
         # leftover daemon thread from another test calling the real time.sleep would
         # otherwise also append to self.sleeps and advance the fake clock, breaking the
         # exact-equality assertions below.
-        time_patcher = mock.patch.object(bot, "time", SimpleNamespace(sleep=fake_sleep))
+        # time=time.time (the real one) too: a leftover thread from another test calling
+        # time.time() during this one must not hit an AttributeError on a bare sleep-only stub.
+        time_patcher = mock.patch.object(bot, "time", SimpleNamespace(sleep=fake_sleep, time=time.time))
         time_patcher.start()
         self.addCleanup(time_patcher.stop)
         datetime_patcher = mock.patch.object(bot, "datetime", SimpleNamespace(now=lambda tz: self.now))

@@ -583,6 +583,7 @@ class Radio:
         self._keepalive_sock = None
         self._ready = threading.Event()
         self._stop = threading.Event()
+        self._connecting = threading.Event()  # set only while blocked inside self._factory(...)
         self._thread = None
         self._subscribed = False
 
@@ -649,6 +650,13 @@ class Radio:
         attempt close() couldn't wait out within its join_timeout."""
         return self._thread is not None and self._thread.is_alive()
 
+    def connect_in_flight(self):
+        """Whether the supervisor is currently blocked inside a call to `factory` (the only
+        part of a connection attempt that can hang -- the underlying library's own socket
+        connect has no timeout of its own). Unlike `supervisor_alive`, this is False while
+        the thread is merely idling in its healthy loop or its retry backoff."""
+        return self._connecting.is_set()
+
     def wait_ready(self, timeout):
         """True once connected (and the channel is the expected one)."""
         end = time.time() + timeout
@@ -712,7 +720,11 @@ class Radio:
             return None
 
     def _connect(self):
-        iface = self._factory(self.cfg["host"], self.cfg["port"])
+        self._connecting.set()
+        try:
+            iface = self._factory(self.cfg["host"], self.cfg["port"])
+        finally:
+            self._connecting.clear()
         try:
             if self._stop.is_set():  # the session ended while we were connecting
                 raise RadioError("session ended")
@@ -897,10 +909,12 @@ def check_radio(cfg, factory=None, timeout=None):
     result and returns True (reachable), False (unreachable -- worth retrying) or None (a
     channel mismatch -- retrying cannot fix it). Used by `schedule()` at startup, so a wrong
     host/port/channel is caught within about a minute instead of only at the next session.
-    Does not return until the probe's connection is fully released (see Radio.close), even
-    if that takes much longer than `timeout` -- so the caller can safely start another
-    attempt, or let the session connect, without a straggling probe still fighting it for
-    the radio's single TCP client slot."""
+    Normally does not return until the probe's connection is fully released (see
+    Radio.close), even if that takes much longer than `timeout` -- so the caller can safely
+    start another attempt, or let the session connect, without a straggling probe still
+    fighting it for the radio's single TCP client slot. That wait is itself bounded
+    (STARTUP_CHECK_JOIN_SECONDS): in the rare case a connection attempt outlives even that,
+    this returns anyway (with a WARNING logged) rather than block forever."""
     host, port, timeout = cfg["host"], cfg["port"], timeout or cfg["startup_check_seconds"]
     log.info("Startup check: connecting to the radio at %s:%s...", host, port)
     radio = Radio(cfg, factory)
@@ -929,18 +943,17 @@ def check_radio(cfg, factory=None, timeout=None):
                      "Node is enabled.", host, port, timeout, reason)
             result = False
     finally:
-        if radio.supervisor_alive():
+        if radio.connect_in_flight():
             log.info("Startup check: waiting for a pending connection attempt to finish before continuing...")
         radio.close(join_timeout=cfg["startup_check_join_seconds"])
         if radio.supervisor_alive():
-            # STARTUP_CHECK_JOIN_SECONDS assumes a single-address host (true for every
-            # documented setup: a Docker service name, or the radio's IP directly). A
-            # hostname resolving to several addresses could in theory still be in flight
-            # here, since the library tries each address in turn with its own SYN timeout.
+            # STARTUP_CHECK_JOIN_SECONDS is generous for a single-address host (true for
+            # every documented setup: a Docker service name, or the radio's IP directly),
+            # but a hostname resolving to several addresses, an unusually slow DNS lookup,
+            # or an unusual OS network config could still in theory outlive it.
             log.warning("Startup check: a connection attempt from an earlier try may still be pending "
-                       "(host %s:%s resolves to more than one address?). It will be cleaned up once it "
-                       "finally resolves, but could still be alive when the next attempt or the session "
-                       "connects.", host, port)
+                       "(host %s:%s). It will be cleaned up once it finally resolves, but could still be "
+                       "alive when the next attempt or the session connects.", host, port)
     return result
 
 
