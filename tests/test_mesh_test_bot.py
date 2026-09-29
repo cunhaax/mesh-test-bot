@@ -838,27 +838,57 @@ class CheckRadioTest(unittest.TestCase):
         # own SYN retries give up) -- our own `timeout` gives up long before that, but
         # check_radio must not return until that straggling attempt is actually done, so a
         # later attempt or the session can never overlap it on the radio's single client slot.
+        # The factory is released from a wrapped Radio.close, strictly after _stop.set(), so
+        # there is no race against wait_ready's own ~0.5s polling granularity (a fixed delay
+        # here could otherwise resolve the hang before -- or after -- wait_ready gives up).
         release = threading.Event()
         ifaces = []
 
         def factory(host, port):
-            release.wait(2)
+            release.wait(10)
             ifaces.append(FakeIface())
             return ifaces[-1]
 
-        def release_soon():
-            time.sleep(0.5)
+        original_close = bot.Radio.close
+        seen = {}
+
+        def close_and_release(self, join_timeout=5.0):
+            seen["join_timeout"] = join_timeout
+            seen["thread"] = self._thread
+            self._stop.set()
             release.set()
-        threading.Thread(target=release_soon, daemon=True).start()
+            original_close(self, join_timeout)
         self.cfg["startup_check_join_seconds"] = 5.0
-        t0 = time.time()
-        with self.assertLogs("bot", "ERROR") as cm:
-            ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        with mock.patch.object(bot.log, "warning") as warn, mock.patch.object(bot.Radio, "close", close_and_release):
+            with self.assertLogs("bot", "ERROR") as cm:
+                ok = bot.check_radio(self.cfg, factory, timeout=0.3)
         self.assertIs(ok, False)
-        self.assertLess(time.time() - t0, 5)
         self.assertIn("no answer", cm.output[-1])
-        self.assertEqual(len(cm.output), 1)  # no spurious log from the stopped supervisor's late attempt
-        self.assertTrue(ifaces and ifaces[0].closed)  # already closed: check_radio waited for it
+        # no spurious log from the late-finishing RadioError("session ended") path (:757-758)
+        self.assertEqual(len(cm.output), 1)
+        warn.assert_not_called()
+        # the actual FAIL-1 guarantee: the long join was used, and really waited the thread out
+        self.assertEqual(seen["join_timeout"], self.cfg["startup_check_join_seconds"])
+        self.assertFalse(seen["thread"].is_alive())
+        self.assertTrue(ifaces and ifaces[0].closed)  # the late connection was torn down, not left dangling
+
+    def test_a_connection_that_outlives_the_join_timeout_logs_a_warning(self):
+        # STARTUP_CHECK_JOIN_SECONDS is generous but still bounded: if a connect attempt
+        # somehow outlives it (e.g. a multi-address hostname, each address getting its own
+        # SYN timeout), check_radio must not block forever -- it should return anyway, but
+        # warn that a stale attempt may still be running.
+        release = threading.Event()
+        self.addCleanup(release.set)  # let the background thread finish, so it doesn't leak into later tests
+
+        def factory(host, port):
+            release.wait(10)
+            return FakeIface()
+        self.cfg["startup_check_join_seconds"] = 0.2  # deliberately shorter than the hang
+        with mock.patch.object(bot.log, "warning") as warn:
+            with self.assertLogs("bot", "ERROR"):
+                ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        self.assertIs(ok, False)
+        self.assertTrue(any("may still be pending" in c.args[0] for c in warn.call_args_list))
 
     def test_a_hung_attempt_that_later_fails_leaves_no_trace_once_stopped(self):
         # Covers the _supervise branch "except Exception: if self._stop.is_set(): return" --
@@ -973,9 +1003,13 @@ class StartupCheckRetryPolicyTest(unittest.TestCase):
         def fake_sleep(s):
             self.sleeps.append(s)
             self.now += timedelta(seconds=s)
-        sleep_patcher = mock.patch.object(bot.time, "sleep", fake_sleep)
-        sleep_patcher.start()
-        self.addCleanup(sleep_patcher.stop)
+        # Patch bot's own reference to the time module, not time.sleep process-wide: a
+        # leftover daemon thread from another test calling the real time.sleep would
+        # otherwise also append to self.sleeps and advance the fake clock, breaking the
+        # exact-equality assertions below.
+        time_patcher = mock.patch.object(bot, "time", SimpleNamespace(sleep=fake_sleep))
+        time_patcher.start()
+        self.addCleanup(time_patcher.stop)
         datetime_patcher = mock.patch.object(bot, "datetime", SimpleNamespace(now=lambda tz: self.now))
         datetime_patcher.start()
         self.addCleanup(datetime_patcher.stop)

@@ -573,7 +573,7 @@ class Radio:
         self.heard = None
         self.lora = None  # the radio's LoRa settings, read on connect
         self.fatal = None  # message of an error that retrying cannot fix
-        self.last_error = None  # str(exception) of the latest failed connection attempt
+        self.last_error = None  # "Type: message" of the latest failed connection attempt
         self.outages = []  # seconds of each period without connection
         self._names = {}  # node number -> short name
         self._my_num = None
@@ -643,6 +643,11 @@ class Radio:
         with contextlib.suppress(Exception):
             if self.iface:
                 self.iface.close()
+
+    def supervisor_alive(self):
+        """Whether the supervisor thread is still running -- e.g. still stuck in a connect
+        attempt close() couldn't wait out within its join_timeout."""
+        return self._thread is not None and self._thread.is_alive()
 
     def wait_ready(self, timeout):
         """True once connected (and the channel is the expected one)."""
@@ -924,7 +929,18 @@ def check_radio(cfg, factory=None, timeout=None):
                      "Node is enabled.", host, port, timeout, reason)
             result = False
     finally:
+        if radio.supervisor_alive():
+            log.info("Startup check: waiting for a pending connection attempt to finish before continuing...")
         radio.close(join_timeout=cfg["startup_check_join_seconds"])
+        if radio.supervisor_alive():
+            # STARTUP_CHECK_JOIN_SECONDS assumes a single-address host (true for every
+            # documented setup: a Docker service name, or the radio's IP directly). A
+            # hostname resolving to several addresses could in theory still be in flight
+            # here, since the library tries each address in turn with its own SYN timeout.
+            log.warning("Startup check: a connection attempt from an earlier try may still be pending "
+                       "(host %s:%s resolves to more than one address?). It will be cleaned up once it "
+                       "finally resolves, but could still be alive when the next attempt or the session "
+                       "connects.", host, port)
     return result
 
 
@@ -985,22 +1001,23 @@ def _startup_check(cfg, factory, wake):
     window also exits -- so a broken setup is loud (a restarting container), not a silent
     wait for the next session."""
     lead = timedelta(minutes=cfg["startup_check_min_lead_minutes"])
-    if wake - datetime.now(cfg["tz"]) < lead:
+    started = datetime.now(cfg["tz"])
+    if wake - started < lead:
         log.info("Startup check skipped: the session connects to the radio in under %.0f min anyway.",
                  cfg["startup_check_min_lead_minutes"])
         return
-    deadline = datetime.now(cfg["tz"]) + lead
+    deadline = started + lead
     delay = cfg["startup_check_backoff_seconds"]
     while True:
-        result = check_radio(cfg, factory)
-        if result:
+        result = check_radio(cfg, factory)  # may itself run well past `timeout` -- see
+        if result:                          # STARTUP_CHECK_JOIN_SECONDS
             return
         if result is None:  # channel mismatch: will not fix itself
             sys.exit(1)
         remaining = (deadline - datetime.now(cfg["tz"])).total_seconds()
         if remaining <= 0:
             log.error("Startup check: giving up after %.0f min with no answer; exiting.",
-                     cfg["startup_check_min_lead_minutes"])
+                     (datetime.now(cfg["tz"]) - started).total_seconds() / 60.0)
             sys.exit(1)
         wait = min(delay, remaining)
         log.warning("Startup check: retrying in %.0fs.", wait)

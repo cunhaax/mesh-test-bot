@@ -8,11 +8,11 @@
 #      Virtual Node on the source (the guide says how).
 #   4. docker compose -f with-meshmonitor.yml up -d bot
 #
-# Starting the bot only after the Virtual Node is enabled matters: at startup the bot
-# briefly connects to check the radio is reachable, retrying for a few minutes and then
-# exiting (so it restarts under "restart: unless-stopped") if it never can -- which is
-# what happens on every restart before step 3 is done. Do step 3 first, or just restart
-# the bot container afterwards (`docker compose -f with-meshmonitor.yml restart bot`).
+# At startup the bot briefly connects to check the radio is reachable, retrying for a few
+# minutes and then exiting (so it restarts under "restart: unless-stopped") if it never
+# can -- which is what happens on every restart before step 3 is done. Doing step 3 first
+# just avoids that pointless restart cycle; "restart: unless-stopped" recovers either way,
+# within a few minutes, once the Virtual Node is enabled -- no manual restart required.
 services:
   meshmonitor:
     image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1
