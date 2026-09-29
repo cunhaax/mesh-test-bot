@@ -38,11 +38,6 @@ def make_cfg(**kw):
            "startup_check_backoff_seconds": bot.STARTUP_CHECK_BACKOFF_SECONDS,
            "startup_check_backoff_cap_seconds": bot.STARTUP_CHECK_BACKOFF_CAP_SECONDS,
            "startup_check_join_seconds": bot.STARTUP_CHECK_JOIN_SECONDS,
-           # Unlike the other startup_check_* values above (all ceilings on how long
-           # something may take), this one is an unconditional sleep on every successful
-           # connect -- default it small here so it doesn't silently add ~1s of real time to
-           # every test that connects successfully; tests of the delay itself override it.
-           "startup_check_close_delay_seconds": 0.01,
            "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
            "rx_file": os.path.join(tmp, "rx.log"), "report_file": os.path.join(tmp, "report.txt"),
            "report_json_file": os.path.join(tmp, "report.jsonl")}
@@ -155,15 +150,15 @@ class ConfigTest(unittest.TestCase):
                         "session_tolerance_seconds = 1\nwake_before_minutes = 99\n"
                         "startup_check_seconds = 1\nstartup_check_min_lead_minutes = 1\n"
                         "startup_check_backoff_seconds = 1\nstartup_check_backoff_cap_seconds = 1\n"
-                        "startup_check_join_seconds = 1\nstartup_check_close_delay_seconds = 1\n")
+                        "startup_check_join_seconds = 1\n")
         self.assertEqual((cfg["min_gap_seconds"], cfg["session_tolerance_seconds"], cfg["wake_before_minutes"]),
                          (bot.MIN_GAP_SECONDS, bot.SESSION_TOLERANCE_SECONDS, bot.WAKE_BEFORE_MINUTES))
         self.assertEqual((cfg["startup_check_seconds"], cfg["startup_check_min_lead_minutes"],
                           cfg["startup_check_backoff_seconds"], cfg["startup_check_backoff_cap_seconds"],
-                          cfg["startup_check_join_seconds"], cfg["startup_check_close_delay_seconds"]),
+                          cfg["startup_check_join_seconds"]),
                          (bot.STARTUP_CHECK_SECONDS, bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
                           bot.STARTUP_CHECK_BACKOFF_SECONDS, bot.STARTUP_CHECK_BACKOFF_CAP_SECONDS,
-                          bot.STARTUP_CHECK_JOIN_SECONDS, bot.STARTUP_CHECK_CLOSE_DELAY_SECONDS))
+                          bot.STARTUP_CHECK_JOIN_SECONDS))
 
     def test_fixed_schedule_is_exempt_from_the_random_schedule_limits(self):
         cfg = self.load("channel = 1\nplace = Lisboa\nmessage_count = 50\nlisten_minutes = 2\n", "--fixed-schedule")
@@ -229,6 +224,9 @@ class TcpFactoryTest(unittest.TestCase):
         except ImportError:
             self.skipTest("meshtastic not installed")
         with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            # Close enough to the real library for this test: _startHeartbeat fires as part
+            # of the connection completing (see the heartbeat-wait tests below for the rest).
+            tcp.return_value.connect.side_effect = lambda: tcp.return_value._startHeartbeat()
             iface = bot.tcp_factory("10.0.0.5", 4404)
         tcp.assert_called_once_with(hostname="10.0.0.5", portNumber=4404, connectNow=False)
         tcp.return_value.connect.assert_called_once_with()
@@ -244,6 +242,52 @@ class TcpFactoryTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 bot.tcp_factory("10.0.0.5", 4404)
         tcp.return_value.close.assert_called_once_with()
+
+    def test_it_waits_for_the_first_heartbeat_before_returning(self):
+        # The real library fires _startHeartbeat asynchronously (from its reader thread) once
+        # the config handshake completes, which can be a little after connect() itself
+        # returns control -- simulated here with a short delay from a background thread.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            def fire_heartbeat_soon():
+                time.sleep(0.1)
+                tcp.return_value._startHeartbeat()
+            tcp.return_value.connect.side_effect = (
+                lambda: threading.Thread(target=fire_heartbeat_soon, daemon=True).start())
+            t0 = time.time()
+            bot.tcp_factory("10.0.0.5", 4404)
+        elapsed = time.time() - t0
+        self.assertGreaterEqual(elapsed, 0.1)  # it actually waited for the heartbeat...
+        self.assertLess(elapsed, 1.0)          # ...but not anywhere near the full bound
+
+    def test_it_gives_up_waiting_if_the_heartbeat_never_fires(self):
+        # Bounded: a factory call must not hang forever if something about the library's
+        # connect-then-heartbeat sequence ever changes underneath this assumption.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp, \
+                mock.patch.object(bot, "HEARTBEAT_SETTLE_SECONDS", 0.1):
+            t0 = time.time()  # connect() does nothing here: the heartbeat never fires
+            iface = bot.tcp_factory("10.0.0.5", 4404)
+        self.assertLess(time.time() - t0, 1.0)
+        self.assertIs(iface, tcp.return_value)
+
+    def test_the_wrapped_heartbeat_still_calls_the_original(self):
+        # Wrapping _startHeartbeat to observe it must not skip the library's own real work.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            original = tcp.return_value._startHeartbeat
+            tcp.return_value.connect.side_effect = lambda: tcp.return_value._startHeartbeat()
+            bot.tcp_factory("10.0.0.5", 4404)
+        original.assert_called_once_with()
 
 
 class LoraModeTest(unittest.TestCase):
@@ -828,41 +872,6 @@ class CheckRadioTest(unittest.TestCase):
         # the supervisor thread stays alive (idling in its healthy loop) after a success --
         # that must not be confused with a still-in-flight connect attempt (connect_in_flight)
         self.assertFalse(any("waiting for a pending" in m for m in cm.output))
-
-    def test_a_successful_connection_gets_a_grace_delay_before_closing(self):
-        # Observed against a real radio: the meshtastic library fires its first heartbeat
-        # send SYNCHRONOUSLY, from its own reader thread, the instant the config handshake
-        # completes -- racing our own close() right after. STARTUP_CHECK_CLOSE_DELAY_SECONDS
-        # gives that send time to finish first. wraps=time.sleep: the real (short) delay
-        # still happens, only its calls are also recorded.
-        self.cfg["startup_check_close_delay_seconds"] = 0.2
-        with mock.patch.object(bot.time, "sleep", wraps=time.sleep) as sleep:
-            ok = bot.check_radio(self.cfg, lambda h, p: FakeIface())
-        self.assertTrue(ok)
-        sleep.assert_any_call(0.2)
-
-    def test_a_channel_mismatch_still_gets_the_delay_since_it_did_reach_the_radio(self):
-        # The race is with the TCP/protocol connection succeeding, which happens before our
-        # own channel check runs -- so a mismatch needs the same grace delay a clean success
-        # does (this is exactly what was observed in practice: the same BrokenPipeError
-        # traceback on a channel mismatch as on success).
-        self.cfg["startup_check_close_delay_seconds"] = 0.2
-        with mock.patch.object(bot.time, "sleep", wraps=time.sleep) as sleep:
-            ok = bot.check_radio(self.cfg, lambda h, p: FakeIface(channels=[(2, "Other")]), timeout=2)
-        self.assertIsNone(ok)
-        sleep.assert_any_call(0.2)
-
-    def test_an_unreachable_radio_gets_no_delay(self):
-        # Nothing was ever connected, so there is no in-flight heartbeat to race -- skip the
-        # delay rather than waste time on the (much more common) plain-unreachable case.
-        self.cfg["startup_check_close_delay_seconds"] = 5.0  # would be very noticeable if wrongly applied
-
-        def factory(host, port):
-            raise OSError("refused")
-        with mock.patch.object(bot.time, "sleep", wraps=time.sleep) as sleep:
-            ok = bot.check_radio(self.cfg, factory, timeout=0.3)
-        self.assertIs(ok, False)
-        sleep.assert_not_called()
 
     def test_an_unreachable_radio_fails_naming_host_port_and_the_underlying_error(self):
         def factory(host, port):
