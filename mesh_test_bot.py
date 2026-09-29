@@ -108,9 +108,9 @@ STARTUP_CHECK_BACKOFF_CAP_SECONDS = 60.0  # --schedule: retry delay never grows 
 # own connection and take the radio's single TCP client slot out from under it. Generous: a
 # hung attempt can run up to ~60s (our own timeout) + ~127s (the Linux default TCP SYN timeout
 # -- the library's socket.create_connection has none of its own) + 30s (the library's config
-# wait) =~ 217s before it resolves by itself; since wait_ready() already waits out
-# startup_check_seconds of that before giving up, the remainder left to wait for here is at
-# most ~157s.
+# wait) + up to HEARTBEAT_SETTLE_SECONDS (tcp_factory, below) =~ 222s before it resolves by
+# itself; since wait_ready() already waits out startup_check_seconds of that before giving up,
+# the remainder left to wait for here is at most ~162s.
 STARTUP_CHECK_JOIN_SECONDS = 170.0
 # tcp_factory: bounded wait for the library's first heartbeat send to finish before handing
 # the connection back (see tcp_factory's docstring for why).
@@ -545,21 +545,25 @@ def tcp_factory(host, port=4403):
     logs a harmless but noisy BrokenPipeError traceback (the library's own logging, via
     `traceback.print_exc()` -- nothing this function raises or catches). `_startHeartbeat` is
     wrapped BEFORE connect() is called, not after, so there is no window where the original,
-    unwrapped version could still be the one that runs."""
+    unwrapped version could still be the one that runs. If a future library version drops or
+    renames `_startHeartbeat`, this degrades gracefully to the old (racy) behavior instead of
+    failing every connection attempt -- same as `_watch_library_reconnects` does for `_reconnect`."""
     from meshtastic.tcp_interface import TCPInterface  # imported late: only needed for a real radio
     iface = TCPInterface(hostname=host, portNumber=port, connectNow=False)
     heartbeat_sent = threading.Event()
-    original_start_heartbeat = iface._startHeartbeat
-
-    def start_heartbeat_and_signal():
-        try:
-            original_start_heartbeat()
-        finally:
-            heartbeat_sent.set()
-    iface._startHeartbeat = start_heartbeat_and_signal
+    original_start_heartbeat = getattr(iface, "_startHeartbeat", None)
+    if original_start_heartbeat is not None:
+        def start_heartbeat_and_signal():
+            try:
+                original_start_heartbeat()
+            finally:
+                heartbeat_sent.set()
+        iface._startHeartbeat = start_heartbeat_and_signal
     try:
         iface.connect()  # waits (up to 30 s) for the radio's config and node db
-        heartbeat_sent.wait(HEARTBEAT_SETTLE_SECONDS)
+        if original_start_heartbeat is not None and not heartbeat_sent.wait(HEARTBEAT_SETTLE_SECONDS):
+            log.debug("The radio's first heartbeat did not complete within %.0fs; closing this "
+                     "connection soon may log a harmless BrokenPipeError traceback.", HEARTBEAT_SETTLE_SECONDS)
     except BaseException:
         with contextlib.suppress(Exception):
             iface.close()
