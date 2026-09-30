@@ -224,10 +224,18 @@ class TcpFactoryTest(unittest.TestCase):
         except ImportError:
             self.skipTest("meshtastic not installed")
         with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            # Close enough to the real library for this test: _startHeartbeat fires as part
+            # of the connection completing (see the heartbeat-wait tests below for the rest).
+            tcp.return_value.connect.side_effect = lambda: tcp.return_value._startHeartbeat()
+            t0 = time.time()
             iface = bot.tcp_factory("10.0.0.5", 4404)
         tcp.assert_called_once_with(hostname="10.0.0.5", portNumber=4404, connectNow=False)
         tcp.return_value.connect.assert_called_once_with()
         self.assertIs(iface, tcp.return_value)
+        # If _startHeartbeat were wrapped only AFTER connect() (recreating the original race),
+        # this synchronous side_effect would call the unwrapped original, the Event would
+        # never be set, and this would take the full HEARTBEAT_SETTLE_SECONDS instead.
+        self.assertLess(time.time() - t0, 1.0)
 
     def test_a_failed_connection_closes_the_interface(self):
         try:
@@ -239,6 +247,77 @@ class TcpFactoryTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 bot.tcp_factory("10.0.0.5", 4404)
         tcp.return_value.close.assert_called_once_with()
+
+    def test_it_waits_for_the_first_heartbeat_before_returning(self):
+        # The real library fires _startHeartbeat asynchronously (from its reader thread) once
+        # the config handshake completes, which can be a little after connect() itself
+        # returns control -- simulated here with a short delay from a background thread.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            def fire_heartbeat_soon():
+                time.sleep(0.1)
+                tcp.return_value._startHeartbeat()
+            tcp.return_value.connect.side_effect = (
+                lambda: threading.Thread(target=fire_heartbeat_soon, daemon=True).start())
+            t0 = time.time()
+            bot.tcp_factory("10.0.0.5", 4404)
+        elapsed = time.time() - t0
+        self.assertGreaterEqual(elapsed, 0.1)  # it actually waited for the heartbeat...
+        self.assertLess(elapsed, 1.0)          # ...but not anywhere near the full bound
+
+    def test_it_gives_up_waiting_if_the_heartbeat_never_fires(self):
+        # Bounded: a factory call must not hang forever if something about the library's
+        # connect-then-heartbeat sequence ever changes underneath this assumption.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp, \
+                mock.patch.object(bot, "HEARTBEAT_SETTLE_SECONDS", 0.1):
+            t0 = time.time()  # connect() does nothing here: the heartbeat never fires
+            iface = bot.tcp_factory("10.0.0.5", 4404)
+        self.assertLess(time.time() - t0, 1.0)
+        self.assertIs(iface, tcp.return_value)
+
+    def test_the_wrapped_heartbeat_still_calls_the_original(self):
+        # Wrapping _startHeartbeat to observe it must not skip the library's own real work.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            original = tcp.return_value._startHeartbeat
+            tcp.return_value.connect.side_effect = lambda: tcp.return_value._startHeartbeat()
+            t0 = time.time()
+            bot.tcp_factory("10.0.0.5", 4404)
+        original.assert_called_once_with()
+        self.assertLess(time.time() - t0, 1.0)  # see the same note in test_it_connects_...
+
+    def test_the_heartbeat_signal_still_fires_if_the_original_raises(self):
+        # The wrapper's `finally` must set the Event even when the original call fails (e.g.
+        # a real sendall() failure) -- otherwise that failure mode would silently regress to
+        # the full HEARTBEAT_SETTLE_SECONDS wait on every such connection.
+        try:
+            import meshtastic.tcp_interface  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic not installed")
+        with mock.patch("meshtastic.tcp_interface.TCPInterface") as tcp:
+            tcp.return_value._startHeartbeat.side_effect = OSError("send failed")
+
+            def fire_heartbeat_soon():
+                time.sleep(0.05)
+                try:
+                    tcp.return_value._startHeartbeat()  # by now, our wrapper around the failing original
+                except OSError:
+                    pass
+            tcp.return_value.connect.side_effect = (
+                lambda: threading.Thread(target=fire_heartbeat_soon, daemon=True).start())
+            t0 = time.time()
+            bot.tcp_factory("10.0.0.5", 4404)
+        self.assertLess(time.time() - t0, 1.0)
 
 
 class LoraModeTest(unittest.TestCase):
