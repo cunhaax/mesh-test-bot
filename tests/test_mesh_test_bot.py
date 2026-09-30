@@ -32,7 +32,12 @@ def make_cfg(**kw):
     tmp = tempfile.mkdtemp()
     cfg = {"host": "x", "port": 4403, "channel": 2, "channel_name": "Test_Channel", "place": "Lisboa", "keyword": "MTBOT",
            "mode": "", "mode_aliases": {"BW62-SF7-CR6": "NARROW_FAST"}, "min_gap_seconds": 0.3,
-           "session_tolerance_seconds": 60.0,
+           "session_tolerance_seconds": 60.0, "wake_before_minutes": bot.WAKE_BEFORE_MINUTES,
+           "startup_check_seconds": bot.STARTUP_CHECK_SECONDS,
+           "startup_check_min_lead_minutes": bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
+           "startup_check_backoff_seconds": bot.STARTUP_CHECK_BACKOFF_SECONDS,
+           "startup_check_backoff_cap_seconds": bot.STARTUP_CHECK_BACKOFF_CAP_SECONDS,
+           "startup_check_join_seconds": bot.STARTUP_CHECK_JOIN_SECONDS,
            "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
            "rx_file": os.path.join(tmp, "rx.log"), "report_file": os.path.join(tmp, "report.txt"),
            "report_json_file": os.path.join(tmp, "report.jsonl")}
@@ -139,12 +144,21 @@ class ConfigTest(unittest.TestCase):
         self.load("channel = 1\nplace = Lisboa\nlisten_minutes = 120\n")
         self.load("channel = 1\nplace = Lisboa\nreport_window_minutes = 60\n")
 
-    def test_min_gap_session_tolerance_and_wake_before_are_not_configurable(self):
+    def test_min_gap_session_tolerance_wake_before_and_startup_check_are_not_configurable(self):
         # a bot.ini setting them is simply ignored: they are internal, fixed values
         cfg = self.load("channel = 1\nplace = Lisboa\nmin_gap_seconds = 1\n"
-                        "session_tolerance_seconds = 1\nwake_before_minutes = 99\n")
+                        "session_tolerance_seconds = 1\nwake_before_minutes = 99\n"
+                        "startup_check_seconds = 1\nstartup_check_min_lead_minutes = 1\n"
+                        "startup_check_backoff_seconds = 1\nstartup_check_backoff_cap_seconds = 1\n"
+                        "startup_check_join_seconds = 1\n")
         self.assertEqual((cfg["min_gap_seconds"], cfg["session_tolerance_seconds"], cfg["wake_before_minutes"]),
                          (bot.MIN_GAP_SECONDS, bot.SESSION_TOLERANCE_SECONDS, bot.WAKE_BEFORE_MINUTES))
+        self.assertEqual((cfg["startup_check_seconds"], cfg["startup_check_min_lead_minutes"],
+                          cfg["startup_check_backoff_seconds"], cfg["startup_check_backoff_cap_seconds"],
+                          cfg["startup_check_join_seconds"]),
+                         (bot.STARTUP_CHECK_SECONDS, bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
+                          bot.STARTUP_CHECK_BACKOFF_SECONDS, bot.STARTUP_CHECK_BACKOFF_CAP_SECONDS,
+                          bot.STARTUP_CHECK_JOIN_SECONDS))
 
     def test_fixed_schedule_is_exempt_from_the_random_schedule_limits(self):
         cfg = self.load("channel = 1\nplace = Lisboa\nmessage_count = 50\nlisten_minutes = 2\n", "--fixed-schedule")
@@ -785,6 +799,267 @@ class RadioTest(unittest.TestCase):
             r._on_receive(packet(1002, "MTBOT LONG_FAST | x"), None)  # must not raise
 
 
+class CheckRadioTest(unittest.TestCase):
+    """check_radio: one bare connectivity probe (see schedule()'s startup check)."""
+
+    def setUp(self):
+        self.cfg = make_cfg(startup_check_seconds=2.0)
+        for name, fake in (("_preset_name", preset_name), ("_region_name", lambda n: "EU_868")):
+            patcher = mock.patch.object(bot, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_reachable_radio_passes_the_check_and_is_released(self):
+        ifaces = []
+
+        def factory(host, port):
+            ifaces.append(FakeIface())
+            return ifaces[-1]
+        with self.assertLogs("bot", "INFO") as cm:
+            ok = bot.check_radio(self.cfg, factory)
+        self.assertTrue(ok)
+        self.assertTrue(ifaces[0].closed)
+        self.assertTrue(any("Startup check OK" in m and "x:4403" in m and "!0000270f" in m for m in cm.output))
+        # the supervisor thread stays alive (idling in its healthy loop) after a success --
+        # that must not be confused with a still-in-flight connect attempt (connect_in_flight)
+        self.assertFalse(any("waiting for a pending" in m for m in cm.output))
+
+    def test_an_unreachable_radio_fails_naming_host_port_and_the_underlying_error(self):
+        def factory(host, port):
+            raise OSError("No route to host")
+        with self.assertLogs("bot", "ERROR") as cm:
+            ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        self.assertIs(ok, False)
+        msg = cm.output[-1]
+        self.assertIn("Startup check FAILED", msg)
+        self.assertIn("x:4403", msg)
+        self.assertIn("OSError: No route to host", msg)
+        self.assertIn("MTBOT_HOST", msg)
+
+    def test_a_hanging_connection_times_out_and_is_fully_closed_before_check_radio_returns(self):
+        # Simulates a connect attempt that eventually resolves on its own (e.g. once the OS's
+        # own SYN retries give up) -- our own `timeout` gives up long before that, but
+        # check_radio must not return until that straggling attempt is actually done, so a
+        # later attempt or the session can never overlap it on the radio's single client slot.
+        # The factory is released from a wrapped Radio.close, strictly after _stop.set(), so
+        # there is no race against wait_ready's own ~0.5s polling granularity (a fixed delay
+        # here could otherwise resolve the hang before -- or after -- wait_ready gives up).
+        release = threading.Event()
+        ifaces = []
+
+        def factory(host, port):
+            release.wait(10)
+            ifaces.append(FakeIface())
+            return ifaces[-1]
+
+        original_close = bot.Radio.close
+        seen = {}
+        # Deliberately NOT Radio.close's own default (5.0), so this actually distinguishes
+        # "check_radio passed our long join_timeout through" from "it silently fell back to
+        # close()'s ordinary default".
+        self.cfg["startup_check_join_seconds"] = 7.0
+
+        def close_and_release(self, join_timeout=5.0):
+            seen["join_timeout"] = join_timeout
+            seen["thread"] = self._thread
+            self._stop.set()
+            release.set()
+            original_close(self, join_timeout)
+        with mock.patch.object(bot.log, "warning") as warn, mock.patch.object(bot.Radio, "close", close_and_release):
+            with self.assertLogs("bot") as cm:
+                ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        self.assertIs(ok, False)
+        errors = [m for m in cm.output if m.startswith("ERROR:")]
+        self.assertIn("no answer", errors[-1])
+        # no spurious log from the late-finishing RadioError("session ended") path in _supervise
+        self.assertEqual(len(errors), 1)
+        warn.assert_not_called()
+        self.assertTrue(any("waiting for a pending" in m for m in cm.output))  # the in-flight INFO heads-up
+        # the guarantee this test exists to prove: the long join was used, and really waited
+        # the thread out, so it can never straggle into a later attempt or the session
+        self.assertEqual(seen["join_timeout"], 7.0)
+        self.assertFalse(seen["thread"].is_alive())
+        self.assertTrue(ifaces and ifaces[0].closed)  # the late connection was torn down, not left dangling
+
+    def test_a_connection_that_outlives_the_join_timeout_logs_a_warning(self):
+        # STARTUP_CHECK_JOIN_SECONDS is generous but still bounded: if a connect attempt
+        # somehow outlives it (e.g. a multi-address hostname, each address getting its own
+        # SYN timeout), check_radio must not block forever -- it should return anyway, but
+        # warn that a stale attempt may still be running.
+        release = threading.Event()
+        self.addCleanup(release.set)  # let the background thread finish, so it doesn't leak into later tests
+
+        def factory(host, port):
+            release.wait(10)
+            return FakeIface()
+        self.cfg["startup_check_join_seconds"] = 0.2  # deliberately shorter than the hang
+        with mock.patch.object(bot.log, "warning") as warn:
+            with self.assertLogs("bot", "ERROR"):
+                ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        self.assertIs(ok, False)
+        self.assertTrue(any("may still be pending" in c.args[0] for c in warn.call_args_list))
+
+    def test_a_hung_attempt_that_later_fails_leaves_no_trace_once_stopped(self):
+        # Covers the _supervise branch "except Exception: if self._stop.is_set(): return" --
+        # a normal (non-hanging-forever) exception arriving after close() must not overwrite
+        # last_error or log anything, since check_radio has already reported its own result.
+        # The factory is released from a wrapped Radio.close, strictly after _stop.set(), so
+        # there is no race between "the attempt fails" and "close() marks it as stopped".
+        release = threading.Event()
+
+        def factory(host, port):
+            release.wait(10)
+            raise OSError("late failure, after the probe gave up")
+
+        original_close = bot.Radio.close
+
+        def close_then_release(self, join_timeout=5.0):
+            self._stop.set()
+            release.set()
+            original_close(self, join_timeout)
+        self.cfg["startup_check_join_seconds"] = 5.0
+        with mock.patch.object(bot.log, "warning") as warn, mock.patch.object(bot.log, "error") as err, \
+                mock.patch.object(bot.Radio, "close", close_then_release):
+            ok = bot.check_radio(self.cfg, factory, timeout=0.3)
+        self.assertIs(ok, False)
+        err.assert_called_once()  # only check_radio's own FAILED line
+        warn.assert_not_called()  # not the supervisor's "No connection ...; retrying" line
+
+    def test_a_wrong_channel_fails_and_says_why(self):
+        def factory(host, port):
+            return FakeIface(channels=[(2, "Other")])
+        with self.assertLogs("bot", "ERROR") as cm:
+            ok = bot.check_radio(self.cfg, factory, timeout=2)
+        self.assertIsNone(ok)
+        msg = cm.output[-1]
+        self.assertIn("expected 'Test_Channel'", msg)
+        self.assertIn("MTBOT_CHANNEL_NAME", msg)
+
+    def test_an_empty_channel_name_checks_reachability_only(self):
+        self.cfg["channel_name"] = ""
+        with self.assertLogs("bot", "INFO") as cm:
+            ok = bot.check_radio(self.cfg, lambda h, p: FakeIface(channels=[(2, "Other")]), timeout=2)
+        self.assertTrue(ok)
+        self.assertTrue(any("not checked" in m for m in cm.output))
+
+    def test_a_radio_that_answers_after_a_retry_passes_with_no_error_logged(self):
+        self.fail_first = 1
+        ifaces = []
+
+        def factory(host, port):
+            if self.fail_first > 0:
+                self.fail_first -= 1
+                raise OSError("radio unreachable")
+            ifaces.append(FakeIface())
+            return ifaces[-1]
+        with mock.patch.object(bot.log, "error") as err:
+            ok = bot.check_radio(self.cfg, factory, timeout=10)
+        self.assertTrue(ok)
+        err.assert_not_called()
+
+    def test_messages_handed_over_on_connect_are_not_recorded(self):
+        try:
+            from pubsub import pub
+        except ImportError:
+            self.skipTest("pypubsub not installed")
+
+        def factory(host, port):
+            iface = FakeIface()
+            pub.sendMessage("meshtastic.receive", packet=packet(1002, "MTBOT LONG_FAST | X | 1/3"), interface=iface)
+            return iface
+        with mock.patch.object(bot.log, "exception") as exc:
+            ok = bot.check_radio(self.cfg, factory, timeout=2)
+        self.assertTrue(ok)
+        self.assertFalse(os.path.exists(self.cfg["rx_file"]))
+        # if the probe were (wrongly) subscribed, _on_receive would hit self.heard being None
+        # and swallow an AttributeError via log.exception -- assert that never happens
+        exc.assert_not_called()
+
+    def test_an_unexpected_error_in_the_check_is_logged_and_does_not_propagate(self):
+        with mock.patch.object(bot.Radio, "start", side_effect=RuntimeError("boom")):
+            with self.assertLogs("bot", "ERROR") as cm:
+                ok = bot.check_radio(self.cfg, lambda h, p: FakeIface(), timeout=1)
+        self.assertIs(ok, False)
+        self.assertIn("RuntimeError: boom", cm.output[-1])
+
+    def test_ctrl_c_during_the_check_still_releases_the_radio(self):
+        closed = []
+        original_close = bot.Radio.close
+
+        def spy_close(self, join_timeout=5.0):
+            closed.append(True)
+            original_close(self, join_timeout)
+        with mock.patch.object(bot.Radio, "wait_ready", side_effect=KeyboardInterrupt):
+            with mock.patch.object(bot.Radio, "close", spy_close):
+                with self.assertRaises(KeyboardInterrupt):
+                    bot.check_radio(self.cfg, lambda h, p: FakeIface(), timeout=1)
+        self.assertEqual(closed, [True])
+
+
+class StartupCheckRetryPolicyTest(unittest.TestCase):
+    """_startup_check's retry/backoff/give-up policy, isolated from check_radio's real
+    networking (patched directly, so calls are instant) and from wall-clock timing (a fake
+    clock plus a no-op time.sleep that just advances it) -- deterministic, unlike driving the
+    policy through a real failing Radio (whose wait_ready() has its own ~0.5s polling
+    granularity regardless of the requested timeout)."""
+
+    def setUp(self):
+        self.cfg = make_cfg(startup_check_min_lead_minutes=5.0, startup_check_backoff_seconds=5.0,
+                            startup_check_backoff_cap_seconds=60.0)
+        self.now = datetime.now(self.cfg["tz"])
+        self.sleeps = []
+
+        def fake_sleep(s):
+            self.sleeps.append(s)
+            self.now += timedelta(seconds=s)
+        # Patch bot's own reference to the time module, not time.sleep process-wide: a
+        # leftover daemon thread from another test calling the real time.sleep would
+        # otherwise also append to self.sleeps and advance the fake clock, breaking the
+        # exact-equality assertions below.
+        # time=time.time (the real one) too: a leftover thread from another test calling
+        # time.time() during this one must not hit an AttributeError on a bare sleep-only stub.
+        time_patcher = mock.patch.object(bot, "time", SimpleNamespace(sleep=fake_sleep, time=time.time))
+        time_patcher.start()
+        self.addCleanup(time_patcher.stop)
+        datetime_patcher = mock.patch.object(bot, "datetime", SimpleNamespace(now=lambda tz: self.now))
+        datetime_patcher.start()
+        self.addCleanup(datetime_patcher.stop)
+        self.wake = self.now + timedelta(minutes=10)  # far enough away that the too-close-to-the-session skip never triggers
+
+    def test_the_backoff_sequence_doubles_and_is_capped(self):
+        with mock.patch.object(bot, "check_radio", side_effect=[False] * 6 + [True]):
+            bot._startup_check(self.cfg, None, self.wake)  # must not raise
+        self.assertEqual(self.sleeps, [5, 10, 20, 40, 60, 60])
+
+    def test_the_final_delay_is_clamped_to_the_remaining_window_not_overshot(self):
+        with mock.patch.object(bot, "check_radio", return_value=False):
+            with self.assertRaises(SystemExit) as cm:
+                bot._startup_check(self.cfg, None, self.wake)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(sum(self.sleeps), 300)  # the 5-minute window, exactly -- never overshot
+        self.assertTrue(all(s <= 60 for s in self.sleeps))
+        self.assertLess(self.sleeps[-1], 60)  # the last wait was clamped short, not a full 60s
+
+    def test_giving_up_is_logged_before_the_process_exits(self):
+        with mock.patch.object(bot, "check_radio", return_value=False):
+            with self.assertLogs("bot", "ERROR") as cm, self.assertRaises(SystemExit) as cm2:
+                bot._startup_check(self.cfg, None, self.wake)
+        self.assertEqual(cm2.exception.code, 1)
+        self.assertTrue(any("giving up" in m for m in cm.output))
+
+    def test_a_channel_mismatch_exits_at_once_with_no_retry_delay(self):
+        with mock.patch.object(bot, "check_radio", return_value=None):
+            with self.assertRaises(SystemExit) as cm:
+                bot._startup_check(self.cfg, None, self.wake)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(self.sleeps, [])
+
+    def test_success_after_some_failures_returns_normally_with_the_right_delays(self):
+        with mock.patch.object(bot, "check_radio", side_effect=[False, False, True]):
+            bot._startup_check(self.cfg, None, self.wake)  # must not raise
+        self.assertEqual(self.sleeps, [5, 10])
+
+
 class SessionTest(unittest.TestCase):
     """A whole (short) session against a fake radio."""
 
@@ -820,6 +1095,167 @@ class SessionTest(unittest.TestCase):
                          [(1, 1, True, "MTBOT LONG_FAST | Lisboa | 1/1")])
         self.assertEqual([(e["name"], e["received"], e["of"], e["path"]) for e in rep["heard"]], [("CD34", 1, 3, "rf")])
         self.assertTrue(iface.closed)
+
+
+class _StopSchedule(BaseException):
+    """Raised by a patched run_window to stop schedule()'s infinite loop after a set number
+    of sessions, without being caught by schedule()'s own except SystemExit/except Exception
+    (both of which only catch Exception, not BaseException)."""
+
+
+class ScheduleStartupCheckTest(unittest.TestCase):
+    """schedule()'s one-time startup connectivity check (see check_radio), integrated with
+    the rest of the scheduling loop."""
+
+    def setUp(self):
+        for name, fake in (("_preset_name", preset_name), ("_region_name", lambda n: "EU_868")):
+            patcher = mock.patch.object(bot, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def window(self, cfg, start_in):
+        now = datetime.now(cfg["tz"])
+        start = now + timedelta(seconds=start_in)
+        return start, start + timedelta(minutes=30)
+
+    def test_a_reachable_radio_is_checked_once_after_next_session_is_logged_then_the_session_runs(self):
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_min_lead_minutes=0.02)
+        start, end = self.window(cfg, 2.0)
+        factory = lambda h, p: FakeIface()  # noqa: E731
+        run_window = mock.Mock(side_effect=_StopSchedule)
+        with mock.patch.object(bot, "next_window", return_value=(start, end)), \
+                mock.patch.object(bot, "run_window", run_window):
+            with self.assertLogs("bot", "INFO") as cm, self.assertRaises(_StopSchedule):
+                bot.schedule(cfg, factory=factory)
+        next_idx = next(i for i, m in enumerate(cm.output) if "Next session" in m)
+        ok_idx = next(i for i, m in enumerate(cm.output) if "Startup check OK" in m)
+        self.assertLess(next_idx, ok_idx)
+        run_window.assert_called_once()
+        args, kwargs = run_window.call_args
+        self.assertEqual(args[2], end)
+        self.assertIs(kwargs.get("factory"), factory)  # the same factory schedule() was given
+
+    def test_a_channel_mismatch_exits_immediately_without_retry(self):
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_min_lead_minutes=0.02)
+        start, end = self.window(cfg, 2.0)
+        factory_calls = []
+
+        def factory(host, port):
+            factory_calls.append(1)
+            return FakeIface(channels=[(2, "Other")])
+        run_window = mock.Mock(side_effect=_StopSchedule)
+        with mock.patch.object(bot, "next_window", return_value=(start, end)), \
+                mock.patch.object(bot, "run_window", run_window):
+            with self.assertRaises(SystemExit) as cm:
+                bot.schedule(cfg, factory=factory)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(len(factory_calls), 1)  # no retry: a mismatch will not fix itself
+        run_window.assert_not_called()
+
+    def test_an_unreachable_radio_retries_then_succeeds_and_the_session_still_runs(self):
+        # check_radio itself is exercised for real elsewhere (CheckRadioTest); here we only
+        # need schedule()/_startup_check() to call it repeatedly and react to its result, so
+        # it's mocked directly -- deterministic, unlike going through a real failing Radio
+        # (whose wait_ready() has its own ~0.5s polling granularity regardless of `timeout`).
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_min_lead_minutes=0.02,
+                       startup_check_backoff_seconds=0.01)
+        start, end = self.window(cfg, 2.0)
+        run_window = mock.Mock(side_effect=_StopSchedule)
+        with mock.patch.object(bot, "next_window", return_value=(start, end)), \
+                mock.patch.object(bot, "run_window", run_window), \
+                mock.patch.object(bot, "check_radio", side_effect=[False, False, True]) as check:
+            with self.assertLogs("bot", "INFO") as cm, self.assertRaises(_StopSchedule):
+                bot.schedule(cfg, factory="the-factory")
+        self.assertEqual(check.call_count, 3)
+        self.assertTrue(any("Next session" in m for m in cm.output))
+        run_window.assert_called_once()
+        self.assertIs(run_window.call_args.kwargs["factory"], "the-factory")
+
+    def test_a_persistently_unreachable_radio_gives_up_and_exits(self):
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_min_lead_minutes=0.005,  # 300ms window
+                       startup_check_backoff_seconds=0.02)
+        start, end = self.window(cfg, 2.0)
+        run_window = mock.Mock(side_effect=_StopSchedule)
+        with mock.patch.object(bot, "next_window", return_value=(start, end)), \
+                mock.patch.object(bot, "run_window", run_window), \
+                mock.patch.object(bot, "check_radio", return_value=False) as check:
+            with self.assertRaises(SystemExit) as cm:
+                bot.schedule(cfg, factory="the-factory")
+        self.assertEqual(cm.exception.code, 1)
+        self.assertGreater(check.call_count, 1)  # it did retry, not just try once
+        run_window.assert_not_called()
+
+    def test_the_check_is_skipped_when_the_session_connects_soon_anyway(self):
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_min_lead_minutes=5.0)
+        start, end = self.window(cfg, 0.3)
+        factory_calls = []
+
+        def factory(host, port):
+            factory_calls.append(1)
+            return FakeIface()
+        run_window = mock.Mock(side_effect=_StopSchedule)
+        with mock.patch.object(bot, "next_window", return_value=(start, end)), \
+                mock.patch.object(bot, "run_window", run_window):
+            with self.assertLogs("bot", "INFO") as cm, self.assertRaises(_StopSchedule):
+                bot.schedule(cfg, factory=factory)
+        self.assertTrue(any("Startup check skipped" in m for m in cm.output))
+        self.assertEqual(factory_calls, [])
+        run_window.assert_called_once()
+
+    def test_the_check_runs_once_per_process_not_before_every_session(self):
+        cfg = make_cfg(wake_before_minutes=0.0, startup_check_seconds=2.0,
+                       startup_check_min_lead_minutes=0.02, startup_check_backoff_seconds=0.05)
+        win1 = self.window(cfg, 3.0)
+        win2 = self.window(cfg, 3.2)
+        windows = iter([win1, win2])
+        calls = {"run_window": 0}
+
+        def run_window_stub(*a, **k):
+            calls["run_window"] += 1
+            if calls["run_window"] >= 2:
+                raise _StopSchedule()
+        factory_calls = []
+
+        def factory(host, port):
+            factory_calls.append(1)
+            return FakeIface()
+        with mock.patch.object(bot, "next_window", side_effect=lambda *a: next(windows)), \
+                mock.patch.object(bot, "run_window", side_effect=run_window_stub):
+            with self.assertRaises(_StopSchedule):
+                bot.schedule(cfg, factory=factory)
+        self.assertEqual(calls["run_window"], 2)
+        self.assertEqual(len(factory_calls), 1)  # the second session is not re-checked
+
+
+class MainStartupCheckTest(unittest.TestCase):
+    """--dry-run (with or without --schedule) and one-shot runs must never probe the radio."""
+
+    def ini(self, extra=""):
+        path = os.path.join(tempfile.mkdtemp(), "bot.ini")
+        open(path, "w", encoding="utf-8").write("[bot]\nchannel = 1\nplace = X\n" + extra)
+        return path
+
+    def test_schedule_dry_run_never_probes_the_radio(self):
+        path = self.ini()
+        with mock.patch.object(bot, "check_radio") as check:
+            rc = bot.main(["--config", path, "--schedule", "--dry-run"])
+        self.assertEqual(rc, 0)
+        check.assert_not_called()
+
+    def test_plain_dry_run_never_probes_the_radio(self):
+        path = self.ini()
+        with mock.patch.object(bot, "check_radio") as check:
+            rc = bot.main(["--config", path, "--now", "--dry-run"])
+        self.assertEqual(rc, 0)
+        check.assert_not_called()
+
+    def test_one_shot_runs_never_call_check_radio(self):
+        path = self.ini()
+        with mock.patch.object(bot, "check_radio") as check, mock.patch.object(bot, "run_window") as rw:
+            rc = bot.main(["--config", path, "--now", "--fixed-schedule", "--listen-minutes", "0", "--count", "0"])
+        self.assertEqual(rc, 0)
+        check.assert_not_called()
+        rw.assert_called_once()
 
 
 if __name__ == "__main__":

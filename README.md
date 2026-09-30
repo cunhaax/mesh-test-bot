@@ -127,6 +127,8 @@ report right at the end. That's what suits testing.
   many there were. Something delivered late
   but received **inside** the session (e.g. after a reconnection) counts normally. If
   the radio's clock isn't set, the packet has no `rxTime` and the bot does not discard it.
+  The `--schedule` startup check (below) also connects briefly and so also drains any
+  stored messages, but never records or counts them (it isn't listening).
 - **Ignores:** other channels, its own node, and messages that don't match the shape above.
 
 ## Prerequisites
@@ -136,7 +138,8 @@ report right at the end. That's what suits testing.
 - A **test channel**, ideally: whatever the bot transmits is heard by everyone on that
   channel, in the same LoRa mode.
 - The radio accepts **only one TCP client at a time**: close the app and any other
-  program connected to the radio (including other bots) during the session.
+  program connected to the radio (including other bots) during the session, at the
+  brief startup check `--schedule` does (below), and on each retry of it.
 
 ## Quick install (Docker, no git)
 
@@ -181,7 +184,14 @@ docker compose down                         # stop
 
 - Reports (`report.txt`, `report.jsonl`) and `rx.log` are in the `data/` folder.
 - To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
-- If the container keeps restarting, `docker compose logs` says what's missing or wrong.
+- **At startup**, the bot briefly connects to the radio to check it's reachable and on
+  the right channel: `Startup check OK` in the log means it's set up correctly. If it
+  can't connect, it retries for a few minutes, then exits and the container restarts
+  (each cycle takes a few minutes, so `docker ps` usually shows `Up` with a low uptime
+  rather than `Restarting`; `docker inspect -f '{{.RestartCount}}' mesh-test-bot` climbing
+  is a clearer sign) until the setup is fixed, instead of waiting quietly for the first
+  scheduled session. `docker compose logs` says what's wrong (usually the host/port in
+  `.env`, or the radio being unreachable).
 - Every option can go in `.env` too, as `MTBOT_<NAME>`: see
   [`defaults.ini`](defaults.ini) for the full list and what each one does.
 
@@ -198,7 +208,9 @@ docker compose logs -f --no-log-prefix
 The container keeps running and holds the session by itself on the configured
 `weekday` and `start_time`. Reports land in `data/report.txt` and
 `data/report.jsonl`, and readings in `data/rx.log`. You should see `Next session: …`
-in the log right after it starts.
+in the log right after it starts, followed within about a minute by `Startup check OK`
+(it briefly connects to the radio to confirm it's reachable and on the right channel,
+then disconnects until the session).
 
 Run a session right away, without waiting (e.g. to test):
 
@@ -238,6 +250,13 @@ python3 mesh_test_bot.py --now             # or: one session right away
 ```
 
 Instead of `--schedule` you can use the system's cron.
+
+**Run `--schedule` under a process supervisor** (systemd with `Restart=on-failure`, for
+example), not bare in a terminal or a plain `nohup`/cron `@reboot` line: if the
+radio is unreachable at startup, the bot retries for a few minutes and then **exits**
+(see [After installing](#after-installing) above) -- without a supervisor to restart it,
+the scheduler is simply gone until someone notices. The Docker Compose setup already has
+this covered (`restart: unless-stopped`).
 
 ## With MeshMonitor (optional)
 
@@ -314,6 +333,12 @@ session with an unknown number of participants.
   the bot **listens and sends on the same connection**: no deaf windows between
   messages, no processes restarting. It reads received packets directly (no parsing of
   debug text), and node names come from the radio's node database.
+- **A brief connectivity check at startup, in `--schedule` mode.** Otherwise a
+  misconfigured host, port or channel would only surface once the first session
+  opens -- potentially days later, on a container that's been running quietly the
+  whole time. The check connects like a real session would, confirms the channel, then
+  disconnects; it retries with backoff for a few minutes on failure and then exits, so
+  a broken setup shows up as a restarting container instead of a silent wait.
 - **Recovers from drops.** The library reconnects a dropped socket by itself, and
   while that's happening the radio is deaf until its configuration comes back, without
   the connection looking dropped from outside. The bot detects those reconnections,
@@ -428,11 +453,14 @@ docker compose up -d
 docker compose logs -f --no-log-prefix
 ```
 
-The log shows the scheduled session (`Next session: …`), the connection to the radio 2
-minutes before, the planned send times (`Sending at: … | report at …`), each message
-sent and each message heard, and at the end the report and the following session, a
-week later. **When you're done, run `docker compose down`** and restore the production
-`.ini`, or the container will transmit on the test channel again the following week.
+The log shows the scheduled session (`Next session: …`), then (since the session in
+this demo is only ~5 minutes out -- close enough that its own connection acts as the
+check) `Startup check skipped: …` instead of a separate `Startup check OK`, the
+connection to the radio 2 minutes before, the planned send times (`Sending at: … |
+report at …`), each message sent and each message heard, and at the end the report and
+the following session, a week later. **When you're done, run `docker compose down`**
+and restore the production `.ini`, or the container will transmit on the test channel
+again the following week.
 
 **Without touching the radio:** `--dry-run` shows just the schedule (`docker compose
 run --rm bot --dry-run`).

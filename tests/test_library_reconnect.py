@@ -27,6 +27,15 @@ class FakeRadioServer:
     def __init__(self):
         self.port, self.connections, self.clients = None, 0, []
         self._listener = None
+        self._open = 0
+        self._lock = threading.Lock()
+
+    def open_clients(self):
+        """How many clients are currently connected (a real client disconnecting -- not
+        just drop_clients() -- decrements this, unlike `connections`, which only counts
+        up)."""
+        with self._lock:
+            return self._open
 
     def start(self, port=0):
         self._listener = socket.socket()
@@ -44,6 +53,8 @@ class FakeRadioServer:
                 return
             self.connections += 1
             self.clients.append(conn)
+            with self._lock:
+                self._open += 1
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
     @staticmethod
@@ -79,6 +90,9 @@ class FakeRadioServer:
                         self._send(conn, mesh_pb2.FromRadio(config_complete_id=msg.want_config_id))
         except OSError:
             return
+        finally:
+            with self._lock:
+                self._open -= 1
 
     def drop_clients(self):
         for conn in self.clients:
@@ -160,6 +174,46 @@ class RealLibraryReconnectTest(unittest.TestCase):
         self.assertGreaterEqual(self.radio.outages[0], 2.0)
         self.assertGreaterEqual(len(self.ifaces), 2)  # a new connection had to be built
         self.assertTrue(self.radio._healthy())
+
+
+@unittest.skipIf(mesh_pb2 is None, "meshtastic not installed")
+class RealLibraryStartupCheckTest(unittest.TestCase):
+    """check_radio against the real meshtastic TCP client and a fake radio server, to check
+    what the fakes elsewhere only assume: the probe connection is actually released."""
+
+    def setUp(self):
+        self.server = FakeRadioServer()
+        self.server.start()
+        self.addCleanup(self.server.stop)
+        tmp = tempfile.mkdtemp()
+        self.cfg = {"host": "127.0.0.1", "port": self.server.port, "channel": 0, "channel_name": "", "place": "X",
+                    "keyword": "MTBOT", "mode": "", "mode_aliases": {}, "min_gap_seconds": 0.1,
+                    "session_tolerance_seconds": 60.0, "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
+                    "rx_file": os.path.join(tmp, "rx.log"), "startup_check_seconds": 20.0,
+                    "startup_check_join_seconds": 10.0}
+        self.cfg["msg_re"] = bot.message_regex("MTBOT")
+
+    def wait_for(self, condition, seconds=20):
+        end = time.time() + seconds
+        while time.time() < end and not condition():
+            time.sleep(0.05)
+        return condition()
+
+    def test_the_check_really_disconnects_from_the_radio(self):
+        with self.assertLogs("bot", "INFO") as cm:
+            ok = bot.check_radio(self.cfg, bot.tcp_factory)
+        self.assertTrue(ok)
+        self.assertTrue(any("Startup check OK" in m for m in cm.output))
+        self.assertTrue(self.wait_for(lambda: self.server.open_clients() == 0))
+        self.assertEqual(self.server.connections, 1)
+
+    def test_a_stopped_server_fails_the_check(self):
+        port = self.server.port
+        self.server.stop()
+        with self.assertLogs("bot", "ERROR") as cm:
+            ok = bot.check_radio(self.cfg, bot.tcp_factory, timeout=3)
+        self.assertIs(ok, False)
+        self.assertIn("127.0.0.1:%d" % port, cm.output[-1])
 
 
 if __name__ == "__main__":
