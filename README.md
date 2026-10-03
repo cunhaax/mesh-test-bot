@@ -6,9 +6,12 @@ the end writes a report of who was heard, over how many hops, with what SNR and 
 and how many of each station's messages arrived. Runs in Docker (or with Python),
 connected to your radio over WiFi, and repeats itself every week.
 
-The report also records the radio's own LoRa mode (`LONG_FAST`, `NARROW_FAST`…) for
-each session, read from the radio's configuration, so you can compare sessions run in
-different modes on the same channel.
+The report also records the radio's own LoRa mode for each session (`Mode:` in
+`report.txt`'s header, `radio.mode` in `report.jsonl`), so you can compare sessions
+run in different modes on the same channel. It's read from the radio's own
+configuration, never typed by hand: the preset's name (`LONG_FAST`, `NARROW_FAST`…)
+or, for manual settings, `BW<kHz>-SF<n>-CR<n>` (e.g. `BW62-SF7-CR6`), which
+`mode_aliases` can rename. Only set `mode` yourself to force a label instead.
 
 > **Unofficial project.** Not affiliated with or endorsed by the Meshtastic project.
 > "Meshtastic" is a trademark of Meshtastic LLC, used here only to indicate which

@@ -679,8 +679,8 @@ class Radio:
 
     @property
     def mode(self):
-        """The LoRa mode label for our messages: the `mode` setting if given, else
-        what the radio is actually set to."""
+        """The LoRa mode label shown in the report header and JSON: the `mode` setting
+        if given, else what the radio is actually set to."""
         return self.cfg["mode"] or (self.lora or {}).get("mode") or "UNKNOWN"
 
     def _snapshot(self, iface):
