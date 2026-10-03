@@ -728,7 +728,7 @@ class ReportTest(unittest.TestCase):
         self.h.feed_packet(packet(1005, "MTBOT", hop_start=4, hop_limit=3))  # unparseable, 1 hop
         self.h.feed_packet(packet(1005, "MTBOT", hop_start=4, hop_limit=1))  # unparseable, 3 hops
         lines = bot.render_text(self.report(), "ACK").splitlines()
-        self.assertIn("Reporter: ME01 (!deadbeef) | Place: Lisboa | Mode: LONG_FAST | Channel: 2 (Test_Channel) | Sent: 1/1", lines[0])
+        self.assertIn("Reporter: ME01 (!deadbeef) - Place: Lisboa - Sent: 1/1", lines[0])
         self.assertEqual(len(lines), 1 + 3)  # header + one line per station, no column-header row of its own
 
         rows = [line.split(" | ") for line in lines[1:]]

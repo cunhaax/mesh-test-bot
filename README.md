@@ -47,14 +47,18 @@ Each session writes two files in the configuration folder:
 elsewhere as-is, not as a table (there's no column header):
 
 ```
-Session 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
+=== 2026-09-26 21:41 ===
+Reporter: AB12 (!deadbeef) - Place: City - Sent: 3/3
 ACK | CD34 | 0   | Villatown | RF
 ACK | EF56 | 1-2 | Valley    | RF
 ```
 
-Each station's line is `<report_prefix> | <name> | <hops> | <place> | RF or MQTT`.
-`report_prefix` is its own option (default `ACK`), separate from the message prefix
-above. The richer numbers — delivery rate, duplicates, SNR, RSSI — stay in
+The `=== ... ===` line marks where each session's report starts in the file (several
+sessions accumulate in the same `report.txt`). The header right after it is `Reporter:
+<name> (<node>) - Place: <place> - Sent: <delivered>/<total>`. Each station's line below
+it is `<report_prefix> | <name> | <hops> | <place> | RF or MQTT`. `report_prefix` is its
+own option (default `ACK`), separate from the message prefix above. The richer numbers —
+session start/end, LoRa mode, channel, delivery rate, duplicates, SNR, RSSI — stay in
 `report.jsonl` only; see below.
 
 **`report.jsonl`**, one JSON line per session (the same session's full data, for

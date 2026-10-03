@@ -555,11 +555,10 @@ def render_text(rep, report_prefix):
     meant to be read or pasted individually (no header row of its own). Each line's
     columns, except the last (free-form place), are padded to line up in a monospace
     view; the last is left unpadded, so no line carries trailing whitespace."""
-    r, s, ra = rep["reporter"], rep["session"], rep["radio"]
+    r = rep["reporter"]
     ok = sum(1 for m in rep["sent"] if m["ok"])
-    lines = ["Session %s → %s | Reporter: %s (%s) | Place: %s | Mode: %s | Channel: %s%s | Sent: %d/%d" % (
-        s["start"][:16].replace("T", " "), s["end"][11:16], r["name"] or "?", r["node"] or "?", r["place"],
-        ra["mode"], ra["channel"], " (%s)" % ra["channel_name"] if ra["channel_name"] else "", ok, len(rep["sent"]))]
+    lines = ["Reporter: %s (%s) - Place: %s - Sent: %d/%d" % (
+        r["name"] or "?", r["node"] or "?", r["place"], ok, len(rep["sent"]))]
     if not rep["heard"]:
         lines.append("(no messages received)")
     else:
