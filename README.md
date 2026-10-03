@@ -6,8 +6,12 @@ the end writes a report of who was heard, over how many hops, with what SNR and 
 and how many of each station's messages arrived. Runs in Docker (or with Python),
 connected to your radio over WiFi, and repeats itself every week.
 
-Useful, for instance, to compare LoRa modes (`LONG_FAST`, `NARROW_FAST`…) on the same
-channel: the same bot configuration, with the radio's own mode tagging the data.
+The report also records the radio's own LoRa mode for each session (`Mode:` in
+`report.txt`'s header, `radio.mode` in `report.jsonl`), so you can compare sessions
+run in different modes on the same channel. It's read from the radio's own
+configuration, never typed by hand: the preset's name (`LONG_FAST`, `NARROW_FAST`…)
+or, for manual settings, `BW<kHz>-SF<n>-CR<n>` (e.g. `BW62-SF7-CR6`), which
+`mode_aliases` can rename. Only set `mode` yourself to force a label instead.
 
 > **Unofficial project.** Not affiliated with or endorsed by the Meshtastic project.
 > "Meshtastic" is a trademark of Meshtastic LLC, used here only to indicate which
@@ -18,49 +22,55 @@ channel: the same bot configuration, with the radio's own mode tagging the data.
 The bot sends messages shaped like this:
 
 ```
-MTBOT NARROW_FAST | City | 2/3
+MTBOT | ABCD | City | 2/3
 ```
 
 | Field | What it is |
 |---|---|
-| `MTBOT` | the keyword (`keyword`): tells the bot's messages apart from regular chat |
-| `NARROW_FAST` | the radio's **LoRa mode**, read from the radio's own configuration (never typed by hand) |
+| `MTBOT` | the prefix (`keyword`): tells the bot's messages apart from regular chat |
+| `ABCD` | the station's own short name, read from the radio (never typed by hand) |
 | `City` | where you are, at city level (`place`) |
 | `2/3` | this is message 2 of 3 in the session, which lets a delivery rate be computed |
 
-It's meant for machines: strict, short (max 200 bytes) and easy to parse. Whoever
-wants to hear your messages only has to use the same keyword.
-
-**The mode** comes from `lora` in the radio's configuration: the preset's name
-(`LONG_FAST`, `NARROW_FAST`…) or, for manual settings, `BW<kHz>-SF<n>-CR<n>` (e.g.
-`BW62-SF7-CR6`), which `mode_aliases` can rename. So when you change the radio's mode,
-the messages change by themselves. A message received with a mode different from yours
-is flagged in the report (it can only come from MQTT or from a wrong label: a radio
-only listens in the mode it is set to).
+Short (max 200 bytes) and easy to parse, but not strict: a message is "ours" as soon
+as it starts with the prefix, however it's punctuated or capitalized, even if the
+rest of it doesn't look exactly like the shape above — see [How messages are
+interpreted](#how-messages-are-interpreted) below for the parsing rules. Whoever wants
+to hear your messages only has to configure the same prefix (`keyword`); it can be
+several words, e.g. `keyword = FIELD TEST ALPHA`.
 
 ## The report
 
 Each session writes two files in the configuration folder:
 
-**`report.txt`**, readable, fields separated by ` | `:
+**`report.txt`**, readable, one short line per station — meant to be read or pasted
+elsewhere as-is, not as a table (there's no column header):
 
 ```
-Session 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
-node      | name | mode      | received | duplicates | hops | avg SNR | avg RSSI | place     | via | note
-!cafef00d | CD34 | LONG_FAST | 2/3      | 1          | 0    | 5.3     | -96      | Villatown | RF  | direct
-!0a1b2c3d | EF56 | LONG_FAST | 3/3      | 0          | 1-2  | -2.5    | -112     | Valley    | RF  | relay 0xe9
+=== 2026-09-26 21:41 ===
+Reporter: AB12 (!deadbeef) - Place: City - Sent: 3/3
+ACK | CD34 | 0   | Villatown | RF
+ACK | EF56 | 1-2 | Valley    | RF
 ```
 
-**`report.jsonl`**, one JSON line per session (the same content, for machines, and the
-object that can later go to a server). Excerpt:
+The `=== ... ===` line marks where each session's report starts in the file (several
+sessions accumulate in the same `report.txt`). The header right after it is `Reporter:
+<name> (<node>) - Place: <place> - Sent: <delivered>/<total>`. Each station's line below
+it is `<report_prefix> | <name> | <hops> | <place> | RF or MQTT`. `report_prefix` is its
+own option (default `ACK`), separate from the message prefix above. The richer numbers —
+session start/end, LoRa mode, channel, delivery rate, duplicates, SNR, RSSI — stay in
+`report.jsonl` only; see below.
+
+**`report.jsonl`**, one JSON line per session (the same session's full data, for
+machines, and the object that can later go to a server). Excerpt:
 
 ```json
-{"schema": 1,
+{"schema": 2,
  "session": {"start": "2026-09-26T21:00:00+01:00", "end": "2026-09-26T21:30:00+01:00", "report_at": "2026-09-26T21:41:07+01:00", "timezone": "Europe/Lisbon"},
  "reporter": {"node": "!deadbeef", "name": "AB12", "place": "City"},
  "radio": {"mode": "LONG_FAST", "region": "EU_868", "use_preset": true, "modem_preset": 0, "bandwidth": 250, "spread_factor": 11, "coding_rate": 5, "channel_num": 1, "channel": 1, "channel_name": "TestChannel"},
- "sent": [{"seq": 1, "total": 3, "planned": "…", "ok": true, "text": "MTBOT LONG_FAST | City | 1/3", "at": "…"}],
- "heard": [{"node": "!cafef00d", "name": "CD34", "place": "Villatown", "path": "rf", "mode_tags": ["LONG_FAST"], "mode_match": true,
+ "sent": [{"seq": 1, "total": 3, "planned": "…", "ok": true, "text": "MTBOT | AB12 | City | 1/3", "at": "…"}],
+ "heard": [{"node": "!cafef00d", "name": "CD34", "place": "Villatown", "path": "rf",
             "received": 2, "of": 3, "receptions": 3, "duplicates": 1, "hops_min": 0, "hops_max": 0,
             "snr_avg": 5.3, "snr_best": 6.0, "rssi_avg": -96, "rssi_best": -94, "relay": "direct", "mqtt_copies": 0, "first": "…", "last": "…"}],
  "outages": {"count": 0, "total_s": 0}}
@@ -70,7 +80,9 @@ object that can later go to a server). Excerpt:
   what it said it sent. **`duplicates`**: repeated readings of the same message.
 - **`hops`**: the lowest and highest seen (`hopStart − hopLimit`). **`SNR` and
   `RSSI`**: average and best value.
-- **`note`**: `direct` (0 hops) or a hint of the node that relayed it (see below).
+- **`place`**: can be `"N/A"` if the message matched the prefix but didn't have one —
+  see [How messages are interpreted](#how-messages-are-interpreted).
+- **`relay`**: `direct` (0 hops) or a hint of the node that relayed it (see below).
 - If the connection to the radio drops during the session, the report says how many
   times and how much time that added up to.
 
@@ -104,17 +116,24 @@ report right at the end. That's what suits testing.
   database), **never** whatever is written in the message itself. If the radio hasn't
   received that node's user info yet, it uses the last 4 hex digits of its id, same as
   the app does (`!a696428c` → `428c`).
-- **Only the exact shape counts**: `<keyword> <mode> | <place> [| n/total]`. Everything
-  else on the channel (chat, other formats, an extra `|`) is ignored and kept in
-  `rx.log`.
+- **Matching is tolerant, not strict.** A message counts as ours as soon as it starts
+  with the configured prefix (`keyword`) — case doesn't matter, and any punctuation or
+  spacing (or none) between the prefix's words is accepted. Everything after the prefix
+  is split into fields on `,`, `-` or `|`: if the last field looks like `n/total`, the
+  field right before it is the place; otherwise the last field itself is the place and
+  there's no numbering. Any other fields in between are ignored. A message that starts
+  with the prefix but has nothing usable after it still counts as heard, with place
+  `"N/A"` rather than being dropped. Everything that doesn't start with the prefix at
+  all (chat, other formats) is ignored and kept in `rx.log`.
 - **Hops:** `hopStart − hopLimit` from the packet. **SNR and RSSI** come from the
   packet itself (absent for packets that arrived via MQTT).
 - **MQTT:** a packet can arrive over LoRa and still have gone through the internet (a
   radio with uplink published it, and another one with downlink sent it out again).
   The point is to measure RF range, so those packets are **always flagged**
   (`viaMqtt`) and **never count as RF**: a station heard only that way shows up with
-  `via = MQTT (does not confirm RF)`. A station heard over RF too counts as RF, and its
-  MQTT copies are only counted separately (`mqtt_copies`).
+  `via = MQTT` (shown as just `MQTT` in the compact `report.txt` line — it does not
+  confirm RF reach). A station heard over RF too counts as RF, and its MQTT copies are
+  only counted separately (`mqtt_copies`).
 - **Relay hint:** the packet only carries the **last byte** of the id of the node that
   last relayed it, so the report lists the known nodes it could be (`relay 0xe9:
   AB12/CD34`). It's a hint, not an identification.
@@ -129,7 +148,7 @@ report right at the end. That's what suits testing.
   the radio's clock isn't set, the packet has no `rxTime` and the bot does not discard it.
   The `--schedule` startup check (below) also connects briefly and so also drains any
   stored messages, but never records or counts them (it isn't listening).
-- **Ignores:** other channels, its own node, and messages that don't match the shape above.
+- **Ignores:** other channels, its own node, and messages that don't start with the prefix.
 
 ## Prerequisites
 
@@ -293,7 +312,10 @@ two with no default. Each option can come from four places, in this order of pri
   in the app, starting at 0). If `channel_name` is set, the bot confirms on connect
   that the index has that name and aborts the session if it doesn't, so it never
   transmits on the wrong channel.
-- **Message:** `place` (required), `keyword` and, to force the mode, `mode`.
+- **Message:** `place` (required), `keyword` (the message prefix) and, to force the
+  mode shown in the report, `mode`.
+- **Report:** `report_prefix`, the prefix repeated on every line of `report.txt`
+  (unrelated to `keyword` above).
 - **Testing without disturbing the network:** point `channel`/`channel_name` at a
   private channel and use `--now --fixed-schedule`. `--dry-run` shows the schedule
   without connecting to the radio.
@@ -412,14 +434,15 @@ docker compose run --rm bot --now --fixed-schedule --listen-minutes 5 --count 0 
 ```
 
 Messages to send from the other radio (the first two should come out as `Heard: …`,
-the last two as `Ignored (not a test message): …`; swap `LONG_FAST` for the radios'
-actual mode):
+the last two as `Ignored (not a test message): …` — they don't start with the prefix
+at all, so they're genuinely not ours, unlike a message that merely has an unusual
+shape after the prefix):
 
 ```
-MTBOT LONG_FAST | City | 1/3
-MTBOT LONG_FAST | City | 2/3
+MTBOT | ABCD | City | 1/3
+MTBOT | ABCD | City | 2/3
 Hey, this is regular chat
-MTBOT LONG_FAST City
+not MTBOT at the start
 ```
 
 **3. Sending and receiving** (sends 1 message on the test channel, and listens for 10

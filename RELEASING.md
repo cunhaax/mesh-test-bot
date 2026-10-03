@@ -33,8 +33,9 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The tag alone triggers the image workflow, which publishes `ghcr.io/cunhaax/mesh-test-bot:0.2.0`
-and `:0.2` (`:latest` stays on `master`, updated by every push there).
+The tag alone triggers the image workflow, which publishes `ghcr.io/cunhaax/mesh-test-bot:0.2.0`,
+`:0.2` and `:latest`. A plain push to `master` only runs the tests — it never builds or
+publishes an image, so clients pinned to `:latest` only see a new image after a tag.
 
 Then draft the release notes from the merged PRs since the last tag:
 
@@ -68,8 +69,8 @@ Packages tab (or `gh api -X DELETE /user/packages/container/mesh-test-bot/versio
 find `<id>` by listing versions first).
 
 This only stops *new* pulls of that exact version tag. `:latest` and any `:X.Y` a
-later push has since overwritten are already safe; anyone who pulled `:0.2.0` before
-you deleted it keeps their copy regardless.
+later release tag has since overwritten are already safe; anyone who pulled `:0.2.0`
+before you deleted it keeps their copy regardless.
 
 For anything more than a minor mistake (wrong notes, an accidental early tag): prefer
 publishing a fixed **PATCH** release over silently deleting the bad one, and for an

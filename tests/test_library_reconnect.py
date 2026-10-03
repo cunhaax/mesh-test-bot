@@ -126,7 +126,7 @@ class RealLibraryReconnectTest(unittest.TestCase):
                     "keyword": "MTBOT", "mode": "", "mode_aliases": {}, "min_gap_seconds": 0.1,
                     "session_tolerance_seconds": 60.0, "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
                     "rx_file": os.path.join(tmp, "rx.log")}
-        self.cfg["msg_re"] = bot.message_regex("MTBOT")
+        self.cfg["prefix_re"] = bot.prefix_regex("MTBOT")
         self.ifaces = []
 
         def factory(host, port):
@@ -191,7 +191,7 @@ class RealLibraryStartupCheckTest(unittest.TestCase):
                     "session_tolerance_seconds": 60.0, "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
                     "rx_file": os.path.join(tmp, "rx.log"), "startup_check_seconds": 20.0,
                     "startup_check_join_seconds": 10.0}
-        self.cfg["msg_re"] = bot.message_regex("MTBOT")
+        self.cfg["prefix_re"] = bot.prefix_regex("MTBOT")
 
     def wait_for(self, condition, seconds=20):
         end = time.time() + seconds

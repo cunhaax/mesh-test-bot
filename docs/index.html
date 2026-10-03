@@ -62,22 +62,22 @@
   </div>
 
   <h2>What a report looks like</h2>
-  <pre class="report-sample"><span class="hl">Session</span> 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
-node      | name | mode      | received | duplicates | hops | avg SNR | avg RSSI | place     | via | note
-!cafef00d | CD34 | LONG_FAST | 2/3      | 1          | 0    | 5.3     | -96      | Villatown | RF  | direct
-!0a1b2c3d | EF56 | LONG_FAST | 3/3      | 0          | 1-2  | -2.5    | -112     | Valley    | RF  | relay 0xe9</pre>
-  <p>One row per station heard, each carrying:</p>
+  <pre class="report-sample"><span class="hl">===</span> 2026-09-26 21:41 <span class="hl">===</span>
+Reporter: AB12 (!deadbeef) - Place: City - Sent: 3/3
+ACK | CD34 | 0   | Villatown | RF
+ACK | EF56 | 1-2 | Valley    | RF</pre>
+  <p>One short, paste-friendly line per station heard. Each line carries the prefix,
+  the station's name, hop range, the place it reported, and RF or MQTT. The matching
+  <code>report.jsonl</code> line for the same session has the fuller numbers too:</p>
   <ul class="plain">
-    <li>📍 <strong>Where they are</strong> — the place name that station itself reports, not guessed from the radio.</li>
     <li>📊 <strong>Delivery rate</strong> — how many of its messages arrived, and duplicate readings of the same one.</li>
-    <li>📶 <strong>Hop range, SNR and RSSI</strong> — best and worst seen during the session.</li>
+    <li>📶 <strong>SNR and RSSI</strong> — best and worst seen during the session.</li>
     <li>🌐 <strong>RF or MQTT</strong> — a copy that only arrived via MQTT is flagged and never counted as RF reach.</li>
     <li>🔁 <strong>A relay hint</strong> — which node likely repeated it, when the packet made more than one hop.</li>
   </ul>
-  <p>Plus a matching <code>report.jsonl</code> line per session, meant for a server to
-  pick up later — reports stay local for now, but a future version may let you opt in
-  to submitting them somewhere, for network-wide coverage stats across everyone
-  running the bot.</p>
+  <p><code>report.jsonl</code> is meant for a server to pick up later — reports stay
+  local for now, but a future version may let you opt in to submitting them
+  somewhere, for network-wide coverage stats across everyone running the bot.</p>
 
   <h2>Get started</h2>
   <p>One command, if you already have Docker:</p>

@@ -31,7 +31,7 @@ def preset_name(number):
 def make_cfg(**kw):
     tmp = tempfile.mkdtemp()
     cfg = {"host": "x", "port": 4403, "channel": 2, "channel_name": "Test_Channel", "place": "Lisboa", "keyword": "MTBOT",
-           "mode": "", "mode_aliases": {"BW62-SF7-CR6": "NARROW_FAST"}, "min_gap_seconds": 0.3,
+           "report_prefix": "ACK", "mode": "", "mode_aliases": {"BW62-SF7-CR6": "NARROW_FAST"}, "min_gap_seconds": 0.3,
            "session_tolerance_seconds": 60.0, "wake_before_minutes": bot.WAKE_BEFORE_MINUTES,
            "startup_check_seconds": bot.STARTUP_CHECK_SECONDS,
            "startup_check_min_lead_minutes": bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
@@ -41,8 +41,8 @@ def make_cfg(**kw):
            "tz": ZoneInfo("Europe/Lisbon"), "timezone": "Europe/Lisbon",
            "rx_file": os.path.join(tmp, "rx.log"), "report_file": os.path.join(tmp, "report.txt"),
            "report_json_file": os.path.join(tmp, "report.jsonl")}
-    cfg["msg_re"] = bot.message_regex(cfg["keyword"])
     cfg.update(kw)
+    cfg["prefix_re"] = bot.prefix_regex(cfg["keyword"])  # after update(): keyword= overrides take effect
     return cfg
 
 
@@ -114,6 +114,7 @@ class ConfigTest(unittest.TestCase):
     def test_minimum_config_and_defaults(self):
         cfg = self.load("channel = 1\nplace = Lisboa\n")
         self.assertEqual((cfg["channel"], cfg["place"], cfg["keyword"], cfg["message_count"]), (1, "Lisboa", "MTBOT", 3))
+        self.assertEqual(cfg["report_prefix"], "ACK")
         self.assertEqual(cfg["mode"], "")  # read from the radio
         self.assertEqual(cfg["mode_aliases"], {"BW62-SF7-CR6": "NARROW_FAST"})
         self.assertTrue(os.path.isabs(cfg["report_json_file"]))
@@ -130,10 +131,51 @@ class ConfigTest(unittest.TestCase):
                 self.load(ini)
 
     def test_bad_values_stop_the_start(self):
-        for ini in ("place = A|B\n", "keyword = a b\n", "mode = a b\n", "mode_aliases = xyz\n",
+        for ini in ("place = A|B\n", "mode = a b\n", "mode_aliases = xyz\n",
                     "place = " + "x" * 200 + "\n", "timezone = Foo/Bar\n", "weekday = xpto\n", "start_time = 25:99\n"):
             with self.subTest(ini=ini), self.assertRaises(SystemExit):
                 self.load("channel = 1\n" + ("" if ini.startswith("place") else "place = Lisboa\n") + ini)
+
+    def test_keyword_may_be_a_multi_word_phrase(self):
+        # file, env and flag all accept it; punctuation between words is also fine, since
+        # the prefix regex treats it as a harmless joiner (see ParseMessageTest).
+        cfg = self.load("channel = 1\nplace = Lisboa\nkeyword = FIELD TEST ALPHA\n")
+        self.assertEqual(cfg["keyword"], "FIELD TEST ALPHA")
+        self.assertTrue(cfg["prefix_re"].match("field test alpha | x | 1/3"))
+        cfg = self.load("channel = 1\nplace = Lisboa\nkeyword = FIELD-TEST, ALPHA\n")
+        self.assertTrue(cfg["prefix_re"].match("field test alpha | x | 1/3"))
+
+    def test_unsafe_keywords_stop_the_start(self):
+        for bad in ("a|b", "!!!", "---", "", "A\x0bB"):
+            # the "=" form, not two separate argv items: argparse would otherwise treat a
+            # dash-leading value like "---" as an unrecognized option of its own.
+            with self.subTest(keyword=bad), self.assertRaises(SystemExit) as cm:
+                self.load("channel = 1\nplace = Lisboa\n", "--keyword=" + bad)
+            self.assertIn("keyword", str(cm.exception))
+
+    def test_a_long_keyword_and_place_that_do_not_fit_stop_the_start(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.load("channel = 1\nplace = " + "x" * 80 + "\nkeyword = " + "y " * 60 + "\n")
+        self.assertIn("keyword", str(cm.exception))
+
+    def test_place_with_a_comma_or_hyphen_warns_but_still_starts(self):
+        # Peers only see the text after the last separator -- a warning, not a hard
+        # rejection, since this merged the moment it ships, reaching deployments that
+        # auto-update and already have such a place configured.
+        with self.assertLogs("bot", "WARNING"):
+            cfg = self.load("channel = 1\nplace = Vila, Sul\n")
+        self.assertEqual(cfg["place"], "Vila, Sul")
+        with self.assertLogs("bot", "WARNING"):
+            self.load("channel = 1\nplace = Vila-Nova\n")
+
+    def test_report_prefix_defaults_to_ack_and_is_configurable(self):
+        self.assertEqual(self.load("channel = 1\nplace = Lisboa\n")["report_prefix"], "ACK")
+        cfg = self.load("channel = 1\nplace = Lisboa\nreport_prefix = DONE\n")
+        self.assertEqual(cfg["report_prefix"], "DONE")
+
+    def test_bad_report_prefix_stops_the_start(self):
+        with self.assertRaises(SystemExit):
+            self.load("channel = 1\nplace = Lisboa\nreport_prefix =\n")
 
     def test_random_schedule_rejects_too_many_messages_or_too_short_a_window(self):
         for ini in ("message_count = 6\n", "listen_minutes = 119\n", "report_window_minutes = 59\n"):
@@ -166,10 +208,9 @@ class ConfigTest(unittest.TestCase):
 
     def test_message_is_built_and_parsed_back(self):
         cfg = self.load("channel = 1\nplace = Vila Nova\n")
-        text = bot.build_message(cfg, "NARROW_FAST", 2, 3)
-        self.assertEqual(text, "MTBOT NARROW_FAST | Vila Nova | 2/3")
-        m = cfg["msg_re"].match(text)
-        self.assertEqual((m["mode"], m["place"], m["seq"], m["total"]), ("NARROW_FAST", "Vila Nova", "2", "3"))
+        text = bot.build_message(cfg, "ABCD", 2, 3)
+        self.assertEqual(text, "MTBOT | ABCD | Vila Nova | 2/3")
+        self.assertEqual(bot.parse_message(text, cfg["prefix_re"]), bot.Parsed("Vila Nova", 2, 3))
 
 
 class EnvironmentTest(unittest.TestCase):
@@ -339,6 +380,90 @@ class LoraModeTest(unittest.TestCase):
         self.assertEqual(bot.lora_mode(manual, {"BW62-SF7-CR6": "NARROW_FAST"}, preset_name), "NARROW_FAST")
 
 
+class ParseMessageTest(unittest.TestCase):
+    """prefix_regex + parse_message: the flexible prefix match and the tolerant,
+    right-anchored field parser. FIELD TEST ALPHA is only ever an illustrative
+    placeholder here, never a real default."""
+
+    def setUp(self):
+        self.prefix_re = bot.prefix_regex("FIELD TEST ALPHA")
+
+    def parse(self, text):
+        return bot.parse_message(text, self.prefix_re)
+
+    def test_prefix_matching_is_forgiving(self):
+        for text in ("FIELD TEST ALPHA | x", "FIELD, test alpha | x", "field testalpha | x",
+                    "FIELD...TEST__ALPHA | x"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(self.parse(text))
+
+    def test_prefix_must_end_at_a_word_boundary(self):
+        self.assertIsNone(self.parse("FIELD TEST ALPHAS | Lisboa | 1/3"))
+        self.assertIsNotNone(self.parse("FIELD TEST ALPHA| Lisboa | 1/3"))
+
+    def test_leading_junk_is_allowed_but_not_a_prefix_mid_text(self):
+        self.assertEqual(self.parse("  >> FIELD TEST ALPHA | Cascais | 1/3").place, "Cascais")
+        self.assertIsNone(self.parse("see FIELD TEST ALPHA | Cascais"))
+
+    def test_non_ascii_prefix_words(self):
+        prefix_re = bot.prefix_regex("ÁLFA TESTE")
+        self.assertEqual(bot.parse_message("álfa-teste | Cascais", prefix_re).place, "Cascais")
+
+    # The 8 worked examples from the spec, verbatim.
+    def test_worked_free_text_then_place_then_numbering(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA, random text blah, my super city, 1/3"),
+                         bot.Parsed("my super city", 1, 3))
+
+    def test_worked_last_field_is_place_when_not_numbered(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA, radio name, city, locality"),
+                         bot.Parsed("locality", None, None))
+
+    def test_worked_irregular_spacing(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA  ,  name, city"), bot.Parsed("city", None, None))
+
+    def test_worked_hyphen_separators_and_joined_prefix(self):
+        self.assertEqual(self.parse("field testalpha - ABCD - Cascais - 2/3"), bot.Parsed("Cascais", 2, 3))
+
+    def test_worked_own_outgoing_format_round_trips(self):
+        text = "FIELD TEST ALPHA | ABCD | Cascais | 2/3"
+        self.assertEqual(self.parse(text), bot.Parsed("Cascais", 2, 3))
+
+    def test_worked_prefix_alone_is_unparseable(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA"), bot.Parsed(bot.UNKNOWN_PLACE, None, None))
+
+    def test_worked_prefix_and_numbering_only(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA, 2/3"), bot.Parsed(bot.UNKNOWN_PLACE, 2, 3))
+
+    def test_worked_unrelated_chat_is_not_ours(self):
+        self.assertIsNone(self.parse("just some unrelated chat"))
+
+    def test_empty_fields_are_dropped(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA || Cascais ,, 2/3 -"), bot.Parsed("Cascais", 2, 3))
+
+    def test_numbering_with_spaces_and_malformed_numbering(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA | Cascais | 2 / 3"), bot.Parsed("Cascais", 2, 3))
+        self.assertEqual(self.parse("FIELD TEST ALPHA | Cascais | 2/"), bot.Parsed("2/", None, None))
+        self.assertEqual(self.parse("FIELD TEST ALPHA | 2/3/4"), bot.Parsed("2/3/4", None, None))
+        self.assertEqual(self.parse("FIELD TEST ALPHA | a/3"), bot.Parsed("a/3", None, None))
+
+    def test_only_separators_after_prefix_is_unparseable(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA , | -"), bot.Parsed(bot.UNKNOWN_PLACE, None, None))
+
+    def test_separator_in_the_name_field_is_harmless(self):
+        self.assertEqual(bot.parse_message("MTBOT | A-B | Lisboa | 1/3", bot.prefix_regex("MTBOT")),
+                         bot.Parsed("Lisboa", 1, 3))
+
+    def test_line_breaks_inside_a_field_do_not_reach_the_place(self):
+        place = self.parse("FIELD TEST ALPHA\nCascais\n2/3").place
+        self.assertNotIn("\n", place)
+
+    def test_old_format_messages_still_parse(self):
+        # A v0.2 sender's message (keyword, mode, place, n/m) under the new parser: the
+        # mode becomes just another ignored middle field.
+        self.assertEqual(bot.parse_message("MTBOT NARROW_FAST | Lisboa | 2/3", bot.prefix_regex("MTBOT")),
+                         bot.Parsed("Lisboa", 2, 3))
+
+
 class HeardTest(unittest.TestCase):
     def setUp(self):
         self.cfg = make_cfg()
@@ -350,32 +475,32 @@ class HeardTest(unittest.TestCase):
         self.h.feed_packet(packet(frm, text, **kw))
 
     def entry(self, name):
-        return next((e for e in self.h.entries("LONG_FAST") if e["name"] == name), None)
+        return next((e for e in self.h.entries() if e["name"] == name), None)
 
     def test_messages_are_parsed(self):
         cases = [
-            (1001, "MTBOT LONG_FAST | Lisboa | 2/3", "AB12", "Lisboa", ["LONG_FAST"]),
-            (1002, "mtbot narrow_fast | Vila, Sul | 1/3", "CD34", "Vila, Sul", ["NARROW_FAST"]),  # case, commas in the place
-            (1005, "  MTBOT LONG_FAST|Serra|3/3", "GH78", "Serra", ["LONG_FAST"]),  # spacing
-            (1003, "MTBOT LONG_FAST | Rio", "\U0001F98A", "Rio", ["LONG_FAST"]),  # not numbered
-            (1006, "MTBOT SHORT_FAST | Praia | 1/1", "03ee", "Praia", ["SHORT_FAST"]),  # node unknown: id digits
-            (1004, "MTBOT LONG_FAST | Alto | 1/2", "03ec", "Alto", ["LONG_FAST"]),  # no user info
+            (1001, "MTBOT LONG_FAST | Lisboa | 2/3", "AB12", "Lisboa"),
+            (1002, "mtbot narrow_fast | Vila, Sul | 1/3", "CD34", "Sul"),  # comma splits the place: last segment wins
+            (1005, "  MTBOT LONG_FAST|Serra|3/3", "GH78", "Serra"),  # spacing
+            (1003, "MTBOT LONG_FAST | Rio", "\U0001F98A", "Rio"),  # not numbered
+            (1006, "MTBOT SHORT_FAST | Praia | 1/1", "03ee", "Praia"),  # node unknown: id digits
+            (1004, "MTBOT LONG_FAST | Alto | 1/2", "03ec", "Alto"),  # no user info
         ]
-        for frm, text, name, place, tags in cases:
+        for frm, text, name, place in cases:
             with self.subTest(text=text):
                 self.heard(frm, text)
                 e = self.entry(name)
-                self.assertEqual((e["place"], e["mode_tags"], e["path"]), (place, tags, "rf"))
+                self.assertEqual((e["place"], e["path"]), (place, "rf"))
 
     def test_the_name_comes_from_the_node_never_from_the_text(self):
-        self.heard(1001, "MTBOT LONG_FAST | Lisboa | 1/3")
+        self.heard(1001, "MTBOT | ZZZZ | Lisboa | 1/3")  # ZZZZ (a name field) is never used for the name
         self.assertEqual([e["name"] for e in self.h.entries()], ["AB12"])
 
     def test_other_messages_are_ignored(self):
-        for text in ("Hey folks, how are you?", "MTBOT", "MTBOT LONG_FAST Lisboa",  # no pipe
-                     "MTBOT LONG_FAST | Lisboa | extra | 1/3",  # an extra field
+        for text in ("Hey folks, how are you?",  # no prefix at all
                      "Test LONG_FAST | Lisboa", "General call, X, Village",  # other formats
-                     "Confirmation, AB12, 3 hops", "see the MTBOT LONG_FAST | Lisboa"):  # not at the start
+                     "Confirmation, AB12, 3 hops", "see the MTBOT LONG_FAST | Lisboa",  # not at the start
+                     "MTBOTS | Lisboa | 1/3"):  # prefix immediately followed by a letter: not a word boundary
             with self.subTest(text=text):
                 self.heard(1001, text)
         self.heard(1001, "MTBOT LONG_FAST | Lisboa", channel=0)  # other channel
@@ -383,6 +508,17 @@ class HeardTest(unittest.TestCase):
         self.h.feed_packet({"from": 1001, "decoded": {"portnum": "POSITION_APP"}, "channel": 2})  # not text
         self.h.feed_packet({"from": 1001, "channel": 2})  # encrypted, undecoded
         self.assertEqual((self.h.rf, self.h.mqtt), ({}, {}))
+
+    def test_a_bare_prefix_and_an_extra_field_both_now_count_as_ours(self):
+        # These used to be rejected by the old strict regex (no pipe, or too many fields).
+        # The new tolerant parser accepts both -- "MTBOT" alone is unparseable (place N/A,
+        # still heard); the extra-field one picks the field right before the "n/m", per spec.
+        self.heard(1001, "MTBOT")
+        self.assertEqual(self.entry("AB12")["place"], bot.UNKNOWN_PLACE)
+        self.heard(1002, "MTBOT LONG_FAST | Lisboa | extra | 1/3")
+        self.assertEqual(self.entry("CD34")["place"], "extra")
+        self.heard(1005, "MTBOT LONG_FAST Lisboa")  # no separator at all after the prefix: one whole field
+        self.assertEqual(self.entry("GH78")["place"], "LONG_FAST Lisboa")
 
     def test_ignored_text_is_recorded_with_its_signal(self):
         self.heard(1001, "Hey folks, how are you?", snr=3.0, rssi=-101)
@@ -437,12 +573,31 @@ class HeardTest(unittest.TestCase):
         self.assertEqual((a["path"], a["received"], a["mqtt_copies"]), ("rf", 1, 1))  # the MQTT copy is not counted
         self.assertEqual((c["path"], c["received"], c["mqtt_copies"]), ("mqtt", 1, 0))
 
-    def test_a_mode_different_from_ours_is_flagged(self):
-        self.heard(1001, "MTBOT NARROW_FAST | Lisboa | 1/3")
-        self.heard(1002, "MTBOT LONG_FAST | Vila | 1/3")
-        self.assertIs(self.entry("AB12")["mode_match"], False)
-        self.assertIs(self.entry("CD34")["mode_match"], True)
-        self.assertIsNone(self.h.entries(None)[0]["mode_match"])  # our own mode unknown
+    def test_unparseable_messages_are_counted_with_na_place_and_full_signal(self):
+        self.heard(1001, "MTBOT", snr=4.0, rssi=-100, hop_start=5, hop_limit=3, relay=0xE9)
+        e = self.entry("AB12")
+        self.assertEqual((e["place"], e["received"], e["of"], e["path"]), (bot.UNKNOWN_PLACE, 1, None, "rf"))
+        self.assertEqual((e["hops_min"], e["hops_max"]), (2, 2))
+        self.assertEqual(e["snr_avg"], 4.0)
+        lines = open(self.cfg["rx_file"], encoding="utf-8").read().splitlines()
+        self.assertNotIn("\tignored\t", lines[-1])  # it matched the prefix: not the same as "not ours"
+
+    def test_numbering_without_place_keeps_the_numbering(self):
+        self.heard(1001, "MTBOT | 2/3")
+        e = self.entry("AB12")
+        self.assertEqual((e["place"], e["received"], e["of"]), (bot.UNKNOWN_PLACE, 1, 3))
+
+    def test_a_real_place_replaces_na_but_not_the_reverse(self):
+        self.heard(1001, "MTBOT")  # N/A
+        self.heard(1001, "MTBOT | X | Lisboa | 1/3")  # upgrades N/A -> a real place
+        self.heard(1001, "MTBOT")  # does not downgrade a real place back to N/A
+        self.heard(1001, "MTBOT | X | Sintra | 2/3")  # a later real place never replaces the first one either
+        self.assertEqual(self.entry("AB12")["place"], "Lisboa")
+
+    def test_unparseable_via_mqtt_only_is_flagged_mqtt(self):
+        self.heard(1001, "MTBOT", mqtt=True)
+        e = self.entry("AB12")
+        self.assertEqual((e["path"], e["place"]), ("mqtt", bot.UNKNOWN_PLACE))
 
 
 class StaleMessagesTest(unittest.TestCase):
@@ -467,7 +622,7 @@ class StaleMessagesTest(unittest.TestCase):
             self.feed(i, rx)
 
     def received(self):
-        entries = self.h.entries("LONG_FAST")
+        entries = self.h.entries()
         return entries[0]["received"] if entries else 0
 
     def test_a_session_that_starts_on_connecting_discards_all_the_stored_ones(self):
@@ -509,6 +664,11 @@ class StaleMessagesTest(unittest.TestCase):
         self.feed(1, 1_800_000_000 - 6)
         self.assertEqual(self.h.stale, 1)
 
+    def test_an_unparseable_stale_message_is_discarded_too(self):
+        self.h.window_start = 1_800_000_000
+        self.feed(1, 1_800_000_000 - 70, text="MTBOT")  # matches the prefix, but has no usable place
+        self.assertEqual((self.received(), self.h.stale), (0, 1))
+
     def test_the_report_says_how_many_were_discarded_only_when_there_were(self):
         radio = SimpleNamespace(lora={"mode": "LONG_FAST"}, mode="LONG_FAST", my_num=9999, short_name=lambda n: "ME01",
                                 outage_count=lambda: 0, outage_seconds=lambda: 0.0)
@@ -517,17 +677,17 @@ class StaleMessagesTest(unittest.TestCase):
                 datetime(2026, 9, 26, 21, 41, tzinfo=tz)]
         clean = bot.build_report(self.cfg, radio, self.h, *when, [])
         self.assertEqual(clean["ignored"], {"before_session": 0})
-        self.assertNotIn("before the session started", bot.render_text(clean))
+        self.assertNotIn("before the session started", bot.render_text(clean, "ACK"))
         self.replay(self.CONNECTED_AT)
         rep = bot.build_report(self.cfg, radio, self.h, *when, [])
         self.assertEqual(rep["ignored"], {"before_session": 8})
-        self.assertIn("warning: 8 test message(s)", bot.render_text(rep))
+        self.assertIn("warning: 8 test message(s)", bot.render_text(rep, "ACK"))
 
 
 class ReportTest(unittest.TestCase):
     def setUp(self):
         self.cfg = make_cfg()
-        self.h = bot.Heard(self.cfg, Directory({1001: "AB12", 1002: "CD34"}))
+        self.h = bot.Heard(self.cfg, Directory({1001: "AB12", 1002: "CD34", 1005: "EF56"}))
         self.radio = SimpleNamespace(
             lora={"mode": "LONG_FAST", "region": "EU_868", "use_preset": True, "modem_preset": 0, "bandwidth": 250,
                   "spread_factor": 11, "coding_rate": 5, "channel_num": 1},
@@ -538,50 +698,69 @@ class ReportTest(unittest.TestCase):
                   datetime(2026, 9, 26, 21, 41, tzinfo=tz)]
 
     def report(self, sent=None):
-        sent = sent if sent is not None else [{"seq": 1, "total": 1, "ok": True, "text": "MTBOT LONG_FAST | Lisboa | 1/1"}]
+        sent = sent if sent is not None else [{"seq": 1, "total": 1, "ok": True, "text": "MTBOT | ME01 | Lisboa | 1/1"}]
         return bot.build_report(self.cfg, self.radio, self.h, *self.t, sent)
 
     def test_the_json_report(self):
         self.h.feed_packet(packet(1001, "MTBOT LONG_FAST | Vila Nova | 1/3", snr=4.5, rssi=-98))
         rep = json.loads(json.dumps(self.report()))  # it must survive a round trip
-        self.assertEqual(rep["schema"], 1)
+        self.assertEqual(rep["schema"], 2)
         self.assertEqual(rep["reporter"], {"node": "!deadbeef", "name": "ME01", "place": "Lisboa"})
         self.assertEqual((rep["radio"]["mode"], rep["radio"]["channel"], rep["radio"]["bandwidth"]), ("LONG_FAST", 2, 250))
         self.assertEqual(rep["session"]["start"], "2026-09-26T21:00:00+01:00")
         self.assertEqual(rep["outages"], {"count": 0, "total_s": 0})
         e = rep["heard"][0]
-        self.assertEqual((e["node"], e["name"], e["received"], e["of"], e["snr_avg"], e["rssi_avg"]),
-                         ("!000003e9", "AB12", 1, 3, 4.5, -98))
+        self.assertEqual((e["node"], e["name"], e["place"], e["received"], e["of"], e["snr_avg"], e["rssi_avg"]),
+                         ("!000003e9", "AB12", "Vila Nova", 1, 3, 4.5, -98))
 
-    def test_the_text_report_has_fields_separated_by_pipes(self):
-        self.h.feed_packet(packet(1001, "MTBOT LONG_FAST | Vila Nova | 1/3", snr=4.5, rssi=-98, hop_start=5, hop_limit=5))
-        self.h.feed_packet(packet(1002, "MTBOT NARROW_FAST | Vale | 1/3", mqtt=True))
-        lines = bot.render_text(self.report()).splitlines()
-        self.assertIn("Reporter: ME01 (!deadbeef) | Place: Lisboa | Mode: LONG_FAST | Channel: 2 (Test_Channel) | Sent: 1/1", lines[0])
+    def test_json_heard_entries_have_exactly_the_schema_2_keys(self):
+        self.h.feed_packet(packet(1001, "MTBOT"))  # unparseable: place must still be "N/A", not missing
+        rep = json.loads(json.dumps(self.report()))
+        self.assertEqual(rep["schema"], bot.SCHEMA)
+        self.assertEqual(set(rep["heard"][0]), {
+            "node", "name", "place", "path", "received", "of", "receptions", "duplicates", "hops_min", "hops_max",
+            "snr_avg", "snr_best", "rssi_avg", "rssi_best", "relay", "mqtt_copies", "first", "last"})
+        self.assertEqual(rep["heard"][0]["place"], "N/A")
 
-        header, row1, row2 = (line.split(" | ") for line in lines[1:4])
-        columns = ["node", "name", "mode", "received", "duplicates", "hops", "avg SNR", "avg RSSI", "place", "via", "note"]
-        self.assertEqual([c.strip() for c in header], columns)
-        self.assertEqual([c.strip() for c in row1],
-                         ["!000003e9", "AB12", "LONG_FAST", "1/3", "0", "0", "4.5", "-98", "Vila Nova", "RF", "direct"])
-        self.assertEqual([c.strip() for c in row2],
-                         ["!000003ea", "CD34", "NARROW_FAST (≠ LONG_FAST)", "1/3", "0", "0", "-", "-", "Vale",
-                          "MQTT (does not confirm RF)", "direct"])
+    def test_the_text_report_has_one_compact_line_per_station(self):
+        self.h.feed_packet(packet(1001, "MTBOT LONG_FAST | Vila Nova | 1/3", hop_start=5, hop_limit=5))  # RF, 0 hops
+        self.h.feed_packet(packet(1002, "MTBOT NARROW_FAST | Vale | 1/3", mqtt=True, hop_start=0, hop_limit=0))
+        self.h.feed_packet(packet(1005, "MTBOT", hop_start=4, hop_limit=3))  # unparseable, 1 hop
+        self.h.feed_packet(packet(1005, "MTBOT", hop_start=4, hop_limit=1))  # unparseable, 3 hops
+        lines = bot.render_text(self.report(), "ACK").splitlines()
+        self.assertIn("Reporter: ME01 (!deadbeef) - Place: Lisboa - Sent: 1/1", lines[0])
+        self.assertEqual(len(lines), 1 + 3)  # header + one line per station, no column-header row of its own
 
-        # Every column (but the free-form last one, never padded) lines up: its "|"
-        # falls at the same character position on every row.
-        for i in range(len(columns) - 1):
-            widths = {len(line.split(" | ")[i]) for line in lines[1:4]}
-            self.assertEqual(len(widths), 1, "column %r not aligned: %r" % (columns[i], widths))
+        rows = [line.split(" | ") for line in lines[1:]]
+        self.assertEqual([c.strip() for c in rows[0]], ["ACK", "AB12", "0", "Vila Nova", "RF"])
+        self.assertEqual([c.strip() for c in rows[1]], ["ACK", "CD34", "-", "Vale", "MQTT"])
+        self.assertEqual([c.strip() for c in rows[2]], ["ACK", "EF56", "1-3", "N/A", "RF"])
+
+        full = "\n".join(lines)
+        for leaked in ("!000003e9", "SNR", "duplicates", "does not confirm RF"):
+            self.assertNotIn(leaked, full)
+        for line in lines[1:]:
+            self.assertEqual(line, line.rstrip())  # no trailing whitespace
+
+        # Every column but the last (free-form place) lines up: its "|" falls at the same
+        # character position on every station row.
+        for i in range(4):
+            widths = {len(line.split(" | ")[i]) for line in lines[1:]}
+            self.assertEqual(len(widths), 1, "column %d not aligned: %r" % (i, widths))
+
+    def test_the_text_report_uses_the_configured_report_prefix(self):
+        self.h.feed_packet(packet(1001, "MTBOT LONG_FAST | Vila Nova | 1/3"))
+        lines = bot.render_text(self.report(), "DONE").splitlines()
+        self.assertTrue(lines[1].startswith("DONE | "))
 
     def test_nothing_heard(self):
-        self.assertIn("(no messages received)", bot.render_text(self.report()))
+        self.assertIn("(no messages received)", bot.render_text(self.report(), "ACK"))
         self.assertEqual(self.report()["heard"], [])
 
     def test_failed_sends_and_outages_are_reported(self):
         self.radio.outage_count, self.radio.outage_seconds = (lambda: 2), (lambda: 7.4)
         rep = self.report(sent=[{"seq": 1, "total": 2, "ok": True, "text": "a"}, {"seq": 2, "total": 2, "ok": False, "text": None}])
-        text = bot.render_text(rep)
+        text = bot.render_text(rep, "ACK")
         self.assertIn("Sent: 1/2", text)
         self.assertIn("interrupted 2 time(s), ~7 s", text)
         self.assertEqual(rep["outages"], {"count": 2, "total_s": 7})
@@ -787,11 +966,12 @@ class RadioTest(unittest.TestCase):
         self.assertEqual(r.send("hello", time.time() + 20), "hello")
         self.assertEqual(self.ifaces[0].sent, [("hello", 2, False)])
 
-    def test_send_builds_the_text_at_the_last_moment_with_the_current_mode(self):
+    def test_send_builds_the_text_at_the_last_moment_with_the_stations_own_name(self):
         r = self.radio()
         r.wait_ready(5)
-        body = r.send(lambda: bot.build_message(self.cfg, r.mode, 1, 3), time.time() + 5)
-        self.assertEqual(body, "MTBOT LONG_FAST | Lisboa | 1/3")
+        body = r.send(lambda: bot.build_message(
+            self.cfg, bot.station_name(r.short_name(r.my_num), r.my_num), 1, 3), time.time() + 5)
+        self.assertEqual(body, "MTBOT | 270f | Lisboa | 1/3")  # my_num 9999 = 0x270f, not in nodesByNum
 
     def test_send_keeps_the_minimum_gap(self):
         r = self.radio()
@@ -1162,17 +1342,17 @@ class SessionTest(unittest.TestCase):
         with mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"):
             bot.run_window(cfg, start, end, factory=lambda host, port: iface)
 
-        self.assertEqual(iface.sent, [("MTBOT LONG_FAST | Lisboa | 1/1", 2, False)])
+        self.assertEqual(iface.sent, [("MTBOT | 270f | Lisboa | 1/1", 2, False)])  # my_num 9999 = 0x270f
         text = open(cfg["report_file"], encoding="utf-8").read()
-        self.assertIn("!000003ea", text)
-        self.assertIn("Vila Alta | RF", text)
+        self.assertIn("ACK | CD34 | 0 | Vila Alta | RF", text)
         lines = open(cfg["report_json_file"], encoding="utf-8").read().splitlines()
         self.assertEqual(len(lines), 1)  # one JSON object per session
         rep = json.loads(lines[0])
-        self.assertEqual((rep["schema"], rep["radio"]["mode"], rep["outages"]["count"]), (1, "LONG_FAST", 0))
+        self.assertEqual((rep["schema"], rep["radio"]["mode"], rep["outages"]["count"]), (bot.SCHEMA, "LONG_FAST", 0))
         self.assertEqual([(m["seq"], m["total"], m["ok"], m["text"]) for m in rep["sent"]],
-                         [(1, 1, True, "MTBOT LONG_FAST | Lisboa | 1/1")])
-        self.assertEqual([(e["name"], e["received"], e["of"], e["path"]) for e in rep["heard"]], [("CD34", 1, 3, "rf")])
+                         [(1, 1, True, "MTBOT | 270f | Lisboa | 1/1")])
+        self.assertEqual([(e["name"], e["place"], e["received"], e["of"], e["path"]) for e in rep["heard"]],
+                         [("CD34", "Vila Alta", 1, 3, "rf")])
         self.assertTrue(iface.closed)
 
 

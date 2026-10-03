@@ -23,13 +23,14 @@ Runs a short, automatic on-air test on a Meshtastic channel:
    running this does not transmit at once. `random_schedule = false` gives fixed
    times instead. A message looks like
 
-       MTBOT NARROW_FAST | Lisboa | 2/3
+       MTBOT | ABCD | Lisboa | 2/3
 
-   i.e. keyword, the radio's LoRa mode, the place, and "n of total". The mode is
-   read from the radio's own LoRa configuration, never typed by hand.
-2. Listens on the same channel the whole time and records every message of that
-   form heard: who (the radio node), over how many hops, with what SNR/RSSI, and
-   how many of the sender's messages arrived (delivery rate, duplicates).
+   i.e. the configured prefix (`keyword`), the station's own short name (from the
+   radio, never typed by hand), the place, and "n of total".
+2. Listens on the same channel the whole time, tolerantly parsing any message that
+   starts with the prefix (even one with extra, ignored fields, or none at all) and
+   records what was heard: who (the radio node), over how many hops, with what
+   SNR/RSSI, and how many of the sender's messages arrived (delivery rate, duplicates).
 3. At a random moment after the emission window writes the report: a readable
    text file (fields separated by " | ") and a JSON line, one per session.
 
@@ -70,13 +71,14 @@ import sys
 import threading
 import time
 from datetime import datetime, time as dtime, timedelta, timezone
+from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger("bot")
 
 ENV_PREFIX = "MTBOT_"  # environment variables: MTBOT_HOST, MTBOT_PLACE...
-SCHEMA = 1  # version of the JSON report
+SCHEMA = 2  # version of the JSON report
 MAX_TEXT_BYTES = 200  # a Meshtastic text message holds about this much
 MIN_EPOCH = 1_000_000_000  # a packet time below this (2001) is not a real clock reading
 MAX_RANDOM_COUNT = 5  # with random_schedule, more than this needs --fixed-schedule
@@ -144,17 +146,57 @@ WEEKDAYS = {name: i for i, names in enumerate([
 
 MODE_RE = re.compile(r"[A-Za-z0-9_.@-]+")
 
-
-def message_regex(keyword):
-    """`<keyword> <mode> | <place> [| n/total]`. Strict on purpose: these messages
-    are written by machines, and a strict form keeps chat out."""
-    return re.compile(
-        r"^\W*" + re.escape(keyword) + r"\s+(?P<mode>[A-Za-z0-9_.@-]+)\s*\|\s*(?P<place>[^|]*?)\s*"
-        r"(?:\|\s*(?P<seq>\d+)\s*/\s*(?P<total>\d+))?\s*$", re.I)
+UNKNOWN_PLACE = "N/A"  # place could not be determined, but the message still started with our prefix
+_FIELD_SEP_RE = re.compile(r"[,|\-]")  # separators allowed between fields after the prefix
+_SEQ_RE = re.compile(r"(\d+)\s*/\s*(\d+)")  # "n/total"
 
 
-def build_message(cfg, mode, seq, total):
-    return "%s %s | %s | %d/%d" % (cfg["keyword"], mode, cfg["place"], seq, total)
+class Parsed(NamedTuple):
+    place: str
+    seq: Optional[int]
+    total: Optional[int]
+
+
+def prefix_regex(keyword):
+    """A regex matching `keyword` at the start of a message, tolerant of case and of
+    any run of non-alphanumeric characters -- or none at all -- between its word
+    tokens: e.g. the prefix "FIELD TEST ALPHA" also matches "FIELD, test alpha" and
+    "field testalpha". Raises ValueError if `keyword` has no word token to anchor on."""
+    tokens = re.findall(r"[^\W_]+", keyword, re.U)
+    if not tokens:
+        raise ValueError("no letter or digit in %r to match" % keyword)
+    pattern = r"^\W*" + r"[\W_]*".join(re.escape(t) for t in tokens) + r"(?![^\W_])"
+    return re.compile(pattern, re.I)
+
+
+def parse_message(text, prefix_re):
+    """Parse an incoming message against `prefix_re` (see prefix_regex). Returns None
+    if the message does not start with the prefix (not ours, same as today's "ignored"
+    handling). Otherwise returns a Parsed: everything after the prefix is split into
+    fields on any of ',' '-' '|'; if the last field looks like "n/m" it is taken as the
+    message's sequence/total and the field right before it (if any) is the place --
+    any other fields in between are intentionally ignored. Otherwise the last field
+    itself is the place and there is no numbering. A message that matches the prefix
+    but has nothing usable (no fields, or numbering with no field before it) still
+    counts as heard -- it gets place UNKNOWN_PLACE rather than being dropped."""
+    m = prefix_re.match(text)
+    if not m:
+        return None
+    # Each field is stripped and has its internal whitespace (including line breaks)
+    # collapsed to single spaces, so a line-broken field can't break the one-line-per-
+    # station text report later.
+    fields = [f for f in (re.sub(r"\s+", " ", x.strip()) for x in _FIELD_SEP_RE.split(text[m.end():])) if f]
+    if not fields:
+        return Parsed(UNKNOWN_PLACE, None, None)
+    seq_m = _SEQ_RE.fullmatch(fields[-1])
+    if seq_m:
+        place = fields[-2] if len(fields) >= 2 else UNKNOWN_PLACE
+        return Parsed(place, int(seq_m.group(1)), int(seq_m.group(2)))
+    return Parsed(fields[-1], None, None)
+
+
+def build_message(cfg, name, seq, total):
+    return "%s | %s | %s | %d/%d" % (cfg["keyword"], name, cfg["place"], seq, total)
 
 
 def parse_aliases(text):
@@ -182,7 +224,9 @@ def load_config(argv):
     ap.add_argument("--channel-name", dest="channel_name",
                     help="expected name of that channel (empty = skip check)")
     ap.add_argument("--place", help="where you are, goes in every message")
-    ap.add_argument("--keyword", help="what our messages start with")
+    ap.add_argument("--keyword", help="what our messages start with (may be several words)")
+    ap.add_argument("--report-prefix", dest="report_prefix",
+                    help="prefix repeated at the start of every line in the text report")
     ap.add_argument("--mode", help="LoRa mode label to use instead of reading it from the radio")
     ap.add_argument("--count", dest="message_count", help="number of messages to send")
     ap.add_argument("--interval", dest="interval_minutes", help="minutes between messages")
@@ -232,17 +276,28 @@ def load_config(argv):
     cfg["place"] = cfg["place"].strip()
     if "|" in cfg["place"] or "\n" in cfg["place"]:
         sys.exit("`place` cannot contain '|' or line breaks: %r" % cfg["place"])
+    if "," in cfg["place"] or "-" in cfg["place"]:
+        log.warning("`place` contains ',' or '-': other bots will only see the text after the "
+                   "last one in their report (%r).", cfg["place"])
     cfg["keyword"] = cfg["keyword"].strip()
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", cfg["keyword"]):
-        sys.exit("`keyword` may only contain letters, digits, '_' and '-': %r" % cfg["keyword"])
+    if not cfg["keyword"] or "|" in cfg["keyword"] or re.search(r"[\x00-\x1f\x7f]", cfg["keyword"]):
+        sys.exit("`keyword` cannot be empty or contain '|' or control characters/line breaks: %r" % cfg["keyword"])
+    try:
+        cfg["prefix_re"] = prefix_regex(cfg["keyword"])
+    except ValueError:
+        sys.exit("`keyword` must contain at least one letter or digit: %r" % cfg["keyword"])
+    cfg["report_prefix"] = cfg["report_prefix"].strip()
+    if not cfg["report_prefix"] or re.search(r"[\x00-\x1f\x7f]", cfg["report_prefix"]):
+        sys.exit("`report_prefix` cannot be empty or contain control characters/line breaks: %r"
+                 % cfg["report_prefix"])
     cfg["mode"] = cfg["mode"].strip()
     if cfg["mode"] and not MODE_RE.fullmatch(cfg["mode"]):
         sys.exit("`mode` may only contain letters, digits, '_', '.', '@' and '-': %r" % cfg["mode"])
     cfg["mode_aliases"] = parse_aliases(cfg["mode_aliases"])
-    worst = build_message(cfg, "X" * 24, 99, 99)
+    worst = build_message(cfg, "\U0001F600" * 4, 99, 99)  # worst-case own short name: 4 4-byte chars
     if len(worst.encode("utf-8")) > MAX_TEXT_BYTES:
-        sys.exit("The message does not fit in %d bytes (`place` too long): %r" % (MAX_TEXT_BYTES, worst))
-    cfg["msg_re"] = message_regex(cfg["keyword"])
+        sys.exit("The message does not fit in %d bytes (`place` or `keyword` too long): %r"
+                 % (MAX_TEXT_BYTES, worst))
     cfg["message_count"] = int(cfg["message_count"])
     cfg["interval_minutes"] = float(cfg["interval_minutes"])
     cfg["listen_minutes"] = float(cfg["listen_minutes"])
@@ -364,7 +419,7 @@ class Heard:
 
     @staticmethod
     def _new(name, when):
-        return {"name": name, "place": "", "tags": set(), "seqs": set(), "unnumbered": 0, "total": None,
+        return {"name": name, "place": "", "seqs": set(), "unnumbered": 0, "total": None,
                 "receptions": 0, "hops_min": None, "hops_max": None, "snr": [], "rssi": [], "note": "",
                 "first": when, "last": when}
 
@@ -382,14 +437,13 @@ class Heard:
         start = packet.get("hopStart")  # absent when 0 (as is hopLimit)
         hops = start - packet.get("hopLimit", 0) if start else None
         snr, rssi = packet.get("rxSnr"), packet.get("rxRssi")  # absent when unknown (MQTT)
-        m = self.cfg["msg_re"].match(text)
-        if not m:
+        parsed = parse_message(text, self.cfg["prefix_re"])
+        if parsed is None:
             # Kept in rx_file too, so that a real session shows which formats are missed.
             self._record(num, name, hops, via_mqtt, snr, rssi, "ignored", text)
             log.info("Ignored (not a test message): %s: %s", name, text)
             return
-        seq = int(m.group("seq")) if m.group("seq") else None
-        total = int(m.group("total")) if m.group("total") else None
+        seq, total = parsed.seq, parsed.total
         rx_time = packet.get("rxTime")  # when the RADIO got it; absent while its clock is not set
         if (self.window_start is not None and rx_time and rx_time > MIN_EPOCH
                 and rx_time < self.window_start - self.cfg.get("session_tolerance_seconds", 60.0)):
@@ -409,9 +463,10 @@ class Heard:
             st = table.setdefault(num, self._new(name, when))
             st["receptions"] += 1
             st["last"] = when
-            st["tags"].add(m.group("mode").upper())
-            if not st["place"]:
-                st["place"] = m.group("place").strip()
+            # First real place wins; a stored UNKNOWN_PLACE is upgraded by a later real one,
+            # but a real place already stored is never replaced (not even by another real one).
+            if st["place"] == "" or (st["place"] == UNKNOWN_PLACE and parsed.place != UNKNOWN_PLACE):
+                st["place"] = parsed.place
             if seq is None:
                 st["unnumbered"] += 1
             else:
@@ -426,9 +481,8 @@ class Heard:
                 st["snr"].append(snr)
             if rssi is not None:
                 st["rssi"].append(rssi)
-        log.info("Heard%s: %s [%s] %s, %s hops, SNR %s, RSSI %s, %s", " (via MQTT)" if via_mqtt else "", name,
-                 m.group("mode").upper(), "%d/%s" % (seq, total if total else "?") if seq else "n/a",
-                 hops, snr, rssi, m.group("place").strip())
+        log.info("Heard%s: %s %s, %s hops, SNR %s, RSSI %s, %s", " (via MQTT)" if via_mqtt else "", name,
+                 "%d/%s" % (seq, total if total else "?") if seq else "n/a", hops, snr, rssi, parsed.place)
 
     def _record(self, num, name, hops, via_mqtt, snr, rssi, note, text):
         with self.lock, open(self.cfg["rx_file"], "a", encoding="utf-8") as f:
@@ -436,7 +490,7 @@ class Heard:
                 datetime.now().isoformat(timespec="seconds"), num, name, hops, via_mqtt,
                 snr, rssi, note, text))
 
-    def entries(self, own_mode=None):
+    def entries(self):
         """One dict per station heard, for the report. A station heard over RF counts as
         RF (its MQTT copies are only counted); one heard ONLY after passing through MQTT
         is marked as such: that says nothing about RF reach."""
@@ -448,8 +502,6 @@ class Heard:
                 out.append({
                     "node": "!%08x" % num, "name": st["name"], "place": st["place"],
                     "path": "rf" if num in self.rf else "mqtt",
-                    "mode_tags": sorted(st["tags"]),
-                    "mode_match": None if not own_mode else all(t == own_mode.upper() for t in st["tags"]),
                     "received": distinct, "of": st["total"], "receptions": st["receptions"],
                     "duplicates": st["receptions"] - distinct,
                     "hops_min": st["hops_min"], "hops_max": st["hops_max"],
@@ -475,38 +527,43 @@ def build_report(cfg, radio, heard, start, end, report_at, sent):
                      if radio.my_num else None, "place": cfg["place"]},
         "radio": dict(lora, mode=radio.mode, channel=cfg["channel"], channel_name=cfg["channel_name"]),
         "sent": sent,
-        "heard": heard.entries(radio.mode),
+        "heard": heard.entries(),
         "outages": {"count": radio.outage_count(), "total_s": round(radio.outage_seconds())},
         "ignored": {"before_session": heard.stale},
     }
 
 
-def _num(value, fmt="%s"):
-    return "-" if value is None else fmt % value
+MAX_REPORT_PLACE_CHARS = 40  # report.txt only -- report.jsonl keeps the full value
 
 
-def render_text(rep):
-    """A readable version of the report: a header, then one line per station, as a
-    plain-text table with its columns padded to line up in a monospace view (a fixed
-    " | " would only align by coincidence). The last column (free-form notes) is left
-    unpadded, so no line carries trailing whitespace."""
-    r, s, ra = rep["reporter"], rep["session"], rep["radio"]
+def _short_place(place):
+    if len(place) <= MAX_REPORT_PLACE_CHARS:
+        return place
+    return place[:MAX_REPORT_PLACE_CHARS - 1] + "…"
+
+
+def _hops_range(e):
+    if e["hops_min"] is None:
+        return "-"
+    if e["hops_min"] == e["hops_max"]:
+        return str(e["hops_min"])
+    return "%d-%d" % (e["hops_min"], e["hops_max"])
+
+
+def render_text(rep, report_prefix):
+    """A readable version of the report: a header, then one short line per station --
+    meant to be read or pasted individually (no header row of its own). Each line's
+    columns, except the last (free-form place), are padded to line up in a monospace
+    view; the last is left unpadded, so no line carries trailing whitespace."""
+    r = rep["reporter"]
     ok = sum(1 for m in rep["sent"] if m["ok"])
-    lines = ["Session %s → %s | Reporter: %s (%s) | Place: %s | Mode: %s | Channel: %s%s | Sent: %d/%d" % (
-        s["start"][:16].replace("T", " "), s["end"][11:16], r["name"] or "?", r["node"] or "?", r["place"],
-        ra["mode"], ra["channel"], " (%s)" % ra["channel_name"] if ra["channel_name"] else "", ok, len(rep["sent"]))]
+    lines = ["Reporter: %s (%s) - Place: %s - Sent: %d/%d" % (
+        r["name"] or "?", r["node"] or "?", r["place"], ok, len(rep["sent"]))]
     if not rep["heard"]:
         lines.append("(no messages received)")
     else:
-        rows = [["node", "name", "mode", "received", "duplicates", "hops", "avg SNR", "avg RSSI", "place", "via", "note"]]
-        for e in rep["heard"]:
-            hops = "-" if e["hops_min"] is None else (
-                str(e["hops_min"]) if e["hops_min"] == e["hops_max"] else "%d-%d" % (e["hops_min"], e["hops_max"]))
-            mode = "/".join(e["mode_tags"]) + ("" if e["mode_match"] is not False else " (≠ %s)" % ra["mode"])
-            note = "; ".join(x for x in (e["relay"], "+%d MQTT copies" % e["mqtt_copies"] if e["mqtt_copies"] else "") if x)
-            rows.append([e["node"], e["name"], mode, "%d/%s" % (e["received"], e["of"] or "?"),
-                        str(e["duplicates"]), hops, _num(e["snr_avg"]), _num(e["rssi_avg"], "%.0f"),
-                        e["place"], "RF" if e["path"] == "rf" else "MQTT (does not confirm RF)", note])
+        rows = [[report_prefix, e["name"], _hops_range(e), _short_place(e["place"]),
+                "RF" if e["path"] == "rf" else "MQTT"] for e in rep["heard"]]
         widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)]
         lines.extend(" | ".join(cell.ljust(w) for cell, w in zip(row[:-1], widths)) + " | " + row[-1] for row in rows)
     if rep["outages"]["count"]:
@@ -621,8 +678,8 @@ class Radio:
 
     @property
     def mode(self):
-        """The LoRa mode label for our messages: the `mode` setting if given, else
-        what the radio is actually set to."""
+        """The LoRa mode label shown in the report header and JSON: the `mode` setting
+        if given, else what the radio is actually set to."""
         return self.cfg["mode"] or (self.lora or {}).get("mode") or "UNKNOWN"
 
     def _snapshot(self, iface):
@@ -996,8 +1053,8 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
     log.info("Sending at: %s | report at %s", ", ".join(s.strftime("%H:%M:%S") for s in slots),
              report_at.strftime("%H:%M:%S"))
     if dry_run:
-        log.info("Message (the mode comes from the radio): %s",
-                 build_message(cfg, cfg["mode"] or "<mode>", 1, max(total, 1)))
+        log.info("Message (the name comes from the radio): %s",
+                 build_message(cfg, "<name>", 1, max(total, 1)))
         return
 
     radio = Radio(cfg, factory)
@@ -1014,7 +1071,9 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
         events = slots + [report_at]
         for i, at in enumerate(slots):
             sleep_until(at, radio)
-            body = radio.send(lambda i=i: build_message(cfg, radio.mode, i + 1, total), events[i + 1].timestamp())
+            body = radio.send(lambda i=i: build_message(
+                cfg, station_name(radio.short_name(radio.my_num), radio.my_num or 0), i + 1, total),
+                events[i + 1].timestamp())
             sent.append({"seq": i + 1, "total": total, "planned": at.isoformat(timespec="seconds"),
                          "ok": body is not None, "text": body,
                          "at": datetime.now(cfg["tz"]).isoformat(timespec="seconds") if body else None})
@@ -1023,7 +1082,7 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
         radio.close()
 
     rep = build_report(cfg, radio, heard, start, end, report_at, sent)
-    text = render_text(rep)
+    text = render_text(rep, cfg["report_prefix"])
     with open(cfg["report_file"], "a", encoding="utf-8") as f:
         f.write("=== %s ===\n%s\n\n" % (datetime.now(cfg["tz"]).strftime("%Y-%m-%d %H:%M"), text))
     with open(cfg["report_json_file"], "a", encoding="utf-8") as f:
