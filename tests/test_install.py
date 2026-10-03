@@ -49,35 +49,68 @@ def read_env_file(path):
 @unittest.skipIf(shutil.which("sh") is None, "needs a POSIX sh")
 class InstallerTest(unittest.TestCase):
     def test_answers_from_the_environment(self):
-        p, out = run_installer(MTBOT_HOST="192.168.1.9", MTBOT_CHANNEL="2", MTBOT_CHANNEL_NAME="Canal", MTBOT_PLACE="Vila Nova")
+        p, out = run_installer(MTBOT_HOST="192.168.1.9", MTBOT_PORT="4403", MTBOT_CHANNEL="2",
+                                MTBOT_CHANNEL_NAME="Canal", MTBOT_PLACE="Vila Nova", MTBOT_KEYWORD="MTBOT",
+                                MTBOT_REPORT_PREFIX="ACK", MTB_ONESHOT="1")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
-            "MTBOT_HOST": "192.168.1.9", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "Canal", "MTBOT_PLACE": "Vila Nova"})
+            "MTBOT_HOST": "192.168.1.9", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "Canal",
+            "MTBOT_PLACE": "Vila Nova", "MTBOT_KEYWORD": "MTBOT", "MTBOT_REPORT_PREFIX": "ACK",
+            "MTBOT_TIMEZONE": "Europe/Lisbon"})
         for name in ("docker-compose.yml", "env.example", "data"):
             self.assertTrue(os.path.exists(os.path.join(out, name)), name)
 
     def test_answers_from_stdin_in_order(self):
-        p, out = run_installer("10.0.0.7\n3\nMeuCanal\nPorto\n")
+        # host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
+        p, out = run_installer("10.0.0.7\n4403\n3\nMeuCanal\nPorto\nCustomKey\nCustomRep\nAmerica/New_York\ny\n")
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(read_env_file(os.path.join(out, ".env")),
-                         {"MTBOT_HOST": "10.0.0.7", "MTBOT_CHANNEL": "3", "MTBOT_CHANNEL_NAME": "MeuCanal", "MTBOT_PLACE": "Porto"})
+        self.assertEqual(read_env_file(os.path.join(out, ".env")), {
+            "MTBOT_HOST": "10.0.0.7", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "3", "MTBOT_CHANNEL_NAME": "MeuCanal",
+            "MTBOT_PLACE": "Porto", "MTBOT_KEYWORD": "CustomKey", "MTBOT_REPORT_PREFIX": "CustomRep",
+            "MTBOT_TIMEZONE": "America/New_York"})
 
     def test_empty_answers_take_the_defaults(self):
-        p, out = run_installer("10.0.0.7\n\n\nPorto\n")  # channel: default 1; channel name: empty is allowed
+        # port, channel, channel_name, keyword, report_prefix, run-once?, weekday, start_time, timezone: all blank
+        p, out = run_installer("10.0.0.7\n\n\n\nPorto\n\n\n\n\n\n\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         env = read_env_file(os.path.join(out, ".env"))
-        self.assertEqual((env["MTBOT_CHANNEL"], env["MTBOT_CHANNEL_NAME"]), ("1", ""))
+        self.assertEqual((env["MTBOT_PORT"], env["MTBOT_CHANNEL"], env["MTBOT_CHANNEL_NAME"], env["MTBOT_KEYWORD"],
+                          env["MTBOT_REPORT_PREFIX"], env["MTBOT_WEEKDAY"], env["MTBOT_START_TIME"], env["MTBOT_TIMEZONE"]),
+                         ("4403", "1", "", "MTBOT", "ACK", "saturday", "06:00", "Europe/Lisbon"))
 
     def test_bad_answers_are_refused_and_nothing_is_created(self):
         good = dict(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         for name, bad in (("MTBOT_CHANNEL", "8"), ("MTBOT_CHANNEL", "abc"), ("MTBOT_HOST", "10.0.0.7 x"),
                           ("MTBOT_HOST", "a;b"), ("MTBOT_PLACE", "It's"), ("MTBOT_PLACE", "A|B"), ("MTBOT_PLACE", "A #b"),
-                          ("MTBOT_CHANNEL_NAME", 'a"b')):
+                          ("MTBOT_CHANNEL_NAME", 'a"b'), ("MTBOT_PORT", "abc"), ("MTBOT_WEEKDAY", "funday"),
+                          ("MTBOT_START_TIME", "25:99"), ("MTBOT_START_TIME", "25:30"), ("MTB_ONESHOT", "true")):
             with self.subTest(**{name: bad}):
                 p, out = run_installer(**dict(good, **{name: bad}))
                 self.assertNotEqual(p.returncode, 0)
                 self.assertIn("Error", p.stderr)
                 self.assertFalse(os.path.exists(out))
+
+    def test_oneshot_mode_skips_weekday_and_start_time_but_keeps_timezone(self):
+        p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
+                                MTBOT_PLACE="Porto", MTB_ONESHOT="1", MTBOT_TIMEZONE="Asia/Tokyo")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):
+            self.assertNotIn(name, env)
+        self.assertEqual(env["MTBOT_TIMEZONE"], "Asia/Tokyo")  # still matters for report timestamps
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "docker-compose.once.yml")))
+
+    def test_recurring_mode_writes_the_weekly_schedule(self):
+        p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
+                                MTBOT_PLACE="Porto", MTB_ONESHOT="0", MTBOT_WEEKDAY="Sunday",
+                                MTBOT_START_TIME="07:30", MTBOT_TIMEZONE="Atlantic/Azores")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual((env["MTBOT_WEEKDAY"], env["MTBOT_START_TIME"], env["MTBOT_TIMEZONE"]),
+                         ("sunday", "07:30", "Atlantic/Azores"))
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "docker-compose.yml")))
 
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
@@ -100,7 +133,8 @@ class InstallerTest(unittest.TestCase):
                          ("10.0.0.7", 2, "Canal Teste", "Vila Nova"))
 
     def test_an_empty_channel_name_is_read_as_not_set(self):
-        p, out = run_installer("10.0.0.7\n1\n\nPorto\n")
+        # host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
+        p, out = run_installer("10.0.0.7\n\n1\n\nPorto\n\n\n\ny\n")
         env = read_env_file(os.path.join(out, ".env"))
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
         with mock.patch.dict(os.environ, dict(clean, **env), clear=True):
@@ -140,14 +174,19 @@ def run_like_curl_pipe(answers):
 @unittest.skipIf(shutil.which("sh") is None or not hasattr(os, "fork"), "needs a POSIX sh and a pty")
 class PipedInstallerTest(unittest.TestCase):
     def test_curl_pipe_sh_asks_on_the_terminal(self):
-        code, screen, out = run_like_curl_pipe(["10.0.0.4", "2", "CanalX", "Braga"])
+        # host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
+        code, screen, out = run_like_curl_pipe(
+            ["10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
         self.assertEqual(code, 0, screen)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
-            "MTBOT_HOST": "10.0.0.4", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX", "MTBOT_PLACE": "Braga"})
+            "MTBOT_HOST": "10.0.0.4", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX",
+            "MTBOT_PLACE": "Braga", "MTBOT_KEYWORD": "MTBOT", "MTBOT_REPORT_PREFIX": "ACK",
+            "MTBOT_TIMEZONE": "Europe/Lisbon"})
         self.assertIn("Radio's IP", screen)
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
-        code, screen, out = run_like_curl_pipe(["10.0.0.4", "9", "CanalX", "Braga"])
+        code, screen, out = run_like_curl_pipe(
+            ["10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
         self.assertNotEqual(code, 0)
         self.assertIn("0 to 7", screen)
         self.assertFalse(os.path.exists(out))
@@ -167,7 +206,8 @@ class InstalledFilesTest(unittest.TestCase):
     def test_the_example_values_of_the_required_ones_are_active_lines(self):
         active = {m.group(1) for line in read(os.path.join(INSTALL, "env.example")).splitlines()
                   if (m := re.match(r"(MTBOT_\w+)=", line))}
-        self.assertEqual(active, {"MTBOT_HOST", "MTBOT_CHANNEL", "MTBOT_CHANNEL_NAME", "MTBOT_PLACE"})
+        self.assertEqual(active, {"MTBOT_HOST", "MTBOT_CHANNEL", "MTBOT_CHANNEL_NAME", "MTBOT_PLACE",
+                                  "MTBOT_KEYWORD", "MTBOT_REPORT_PREFIX"})
 
     def test_the_end_user_compose_file(self):
         import yaml
@@ -175,6 +215,14 @@ class InstalledFilesTest(unittest.TestCase):
         self.assertTrue(svc["image"].startswith("ghcr.io/"))
         self.assertNotIn("build", svc)  # people without the code cannot build
         self.assertEqual((svc["env_file"], svc["restart"], svc["volumes"]), (".env", "unless-stopped", ["./data:/data"]))
+
+    def test_the_oneshot_compose_file(self):
+        import yaml
+        svc = yaml.safe_load(read(os.path.join(INSTALL, "docker-compose.once.yml")))["services"]["bot"]
+        self.assertTrue(svc["image"].startswith("ghcr.io/"))
+        self.assertNotIn("build", svc)
+        self.assertEqual((svc["env_file"], svc["restart"], svc["volumes"]), (".env", "no", ["./data:/data"]))
+        self.assertEqual(svc["command"], ["--now", "--fixed-schedule"])
 
     def test_the_meshmonitor_example(self):
         import yaml

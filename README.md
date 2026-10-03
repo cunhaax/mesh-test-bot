@@ -172,9 +172,11 @@ the source code.
 curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh
 ```
 
-Asks 4 questions (the radio's IP, the test channel's index and name, and your city),
-creates a `mesh-test-bot/` folder with the configuration, and starts the bot. If you'd
-rather read the script before running it, download it and open it: it's about a
+Asks a few questions (the radio's IP and port, the test channel's index and name, your
+city, the message/report prefixes, and whether to run once now or on a recurring
+weekly schedule) — press Enter to accept the default shown in brackets for any of
+them. Creates a `mesh-test-bot/` folder with the configuration, and starts the bot. If
+you'd rather read the script before running it, download it and open it: it's about a
 hundred lines.
 
 ### By hand (also on Windows)

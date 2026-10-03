@@ -1,0 +1,23 @@
+# mesh-test-bot: install without git, for a single one-off test run (no recurring
+# schedule). This file + an ".env" file next to it.
+#
+#   docker compose up -d                      run once, then the container stops
+#   docker compose logs -f --no-log-prefix    see what it's doing
+#   docker compose pull && docker compose up -d   update, then run once again
+#
+# Configuration lives in the .env file (see env.example). Reports and rx.log are
+# written to the data/ folder next to this file.
+services:
+  bot:
+    # To avoid surprises on updates, you can pin a version instead of :latest, e.g.
+    # ...:0.1 (tracks patch releases of 0.1.x) or ...:0.1.0 (exact) -- see the
+    # available tags at https://github.com/cunhaax/mesh-test-bot/pkgs/container/mesh-test-bot
+    image: ghcr.io/cunhaax/mesh-test-bot:latest
+    container_name: mesh-test-bot
+    # Not unless-stopped: that policy restarts the container after every exit (even a
+    # clean one), which would turn a single test run into a repeating loop.
+    restart: "no"
+    command: ["--now", "--fixed-schedule"]
+    env_file: .env
+    volumes:
+      - ./data:/data
