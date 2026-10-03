@@ -56,8 +56,9 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           labels: |
             org.opencontainers.image.licenses=GPL-3.0-or-later
+          flavor: |
+            latest=auto
           tags: |
-            type=raw,value=latest
             type=sha,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
