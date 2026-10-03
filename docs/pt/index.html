@@ -65,21 +65,22 @@
 
   <h2>Como é um relatório</h2>
   <pre class="report-sample"><span class="hl">Session</span> 2026-09-26 21:00 → 21:30 | Reporter: AB12 (!deadbeef) | Place: City | Mode: LONG_FAST | Channel: 1 (TestChannel) | Sent: 3/3
-node      | name | mode      | received | duplicates | hops | avg SNR | avg RSSI | place     | via | note
-!cafef00d | CD34 | LONG_FAST | 2/3      | 1          | 0    | 5.3     | -96      | Villatown | RF  | direct
-!0a1b2c3d | EF56 | LONG_FAST | 3/3      | 0          | 1-2  | -2.5    | -112     | Valley    | RF  | relay 0xe9</pre>
-  <p>Uma linha por estação ouvida, cada uma com:</p>
+ACK | CD34 | 0   | Villatown | RF
+ACK | EF56 | 1-2 | Valley    | RF</pre>
+  <p>Uma linha curta e fácil de colar por estação ouvida, com o prefixo, o nome da
+  estação, o intervalo de hops, o local que reportou, e RF ou MQTT. A linha
+  correspondente em <code>report.jsonl</code>, para a mesma sessão, tem também os
+  números completos:</p>
   <ul class="plain">
-    <li>📍 <strong>Onde está</strong> — o local que a própria estação reporta, e não uma estimativa a partir do rádio.</li>
     <li>📊 <strong>Taxa de entrega</strong> — quantas das suas mensagens chegaram, e leituras duplicadas da mesma.</li>
-    <li>📶 <strong>Intervalo de hops, SNR e RSSI</strong> — o melhor e o pior valor visto durante a sessão.</li>
+    <li>📶 <strong>SNR e RSSI</strong> — o melhor e o pior valor visto durante a sessão.</li>
     <li>🌐 <strong>RF ou MQTT</strong> — uma cópia que só chegou via MQTT é assinalada e nunca conta como alcance RF.</li>
     <li>🔁 <strong>Uma pista de relay</strong> — que nó provavelmente a retransmitiu, quando o pacote deu mais do que um salto.</li>
   </ul>
-  <p>Mais uma linha correspondente em <code>report.jsonl</code> por sessão, pensada para
-  um servidor ir buscar mais tarde — por agora os relatórios ficam só na tua máquina,
-  mas uma versão futura pode permitir enviá-los, por opção tua, para agregar
-  estatísticas de cobertura de toda a rede, com todos os que usarem o bot.</p>
+  <p><code>report.jsonl</code> é pensado para um servidor ir buscar mais tarde — por
+  agora os relatórios ficam só na tua máquina, mas uma versão futura pode permitir
+  enviá-los, por opção tua, para agregar estatísticas de cobertura de toda a rede, com
+  todos os que usarem o bot.</p>
 
   <h2>Começar</h2>
   <p>Um comando, se já tiveres Docker:</p>
