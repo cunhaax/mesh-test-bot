@@ -93,10 +93,11 @@ MeshMonitor's log then shows `Virtual node server listening on port 4404`.
 - **The Virtual Node has no authentication.** Whoever can reach it can use it. That's
   why the example does not publish 4404 outside Docker, and admin commands stay
   disabled.
-- **The UI stays on `127.0.0.1` only.** To open it from another computer, change the
-  port mapping and `ALLOWED_ORIGINS` to the address you open it at (it must match
-  exactly: `localhost` and `127.0.0.1` count as different origins), and keep the
-  password changed.
+- **The UI is published on every interface of the machine, so your LAN can reach it.**
+  Change the default password (`admin` / `changeme`) before anyone else connects. Set
+  `ALLOWED_ORIGINS` to the exact address you open it at (`localhost` and `127.0.0.1` count as
+  different origins). To keep it on this machine only, change the port mapping to
+  `"127.0.0.1:8080:3001"`.
 - **MeshMonitor's automation features come disabled** on a fresh install (auto
   replies, announcements, traceroutes, time sync), so it transmits nothing on its own.
   Worth checking under *Settings* before enabling them: every transmission of its own
