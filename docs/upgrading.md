@@ -6,7 +6,7 @@ Read this before you update an install from before v0.3.0. The [README](../READM
 install keeps running the old version until you pull:
 
 ```sh
-docker compose pull && docker compose up -d --force-recreate
+docker compose pull && docker compose up -d
 ```
 
 Before the session limits, scheduled installs could use shorter sessions, a `random_schedule`

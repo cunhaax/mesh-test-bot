@@ -20,7 +20,7 @@ node --test tests/test_calculator.js
 
 ### Real, against the radio (with Docker)
 
-Once installed (see above), these are ways to try it out before leaving it scheduled.
+Once installed (see [Quick install](../README.md#quick-install-docker-no-git)), these are ways to try it out before leaving it scheduled.
 Rules for all of them:
 
 - **Use a test channel**: whatever you transmit is heard by everyone on that channel.

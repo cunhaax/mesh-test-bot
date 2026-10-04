@@ -140,7 +140,7 @@ Numeric values go in quotes, so YAML keeps them as text.
 
 ## Upgrading
 
-Run `docker compose pull && docker compose up -d --force-recreate` first, so you get the newest
+Run `docker compose pull && docker compose up -d` first, so you get the newest
 image. Then read [Upgrading from an older version](docs/upgrading.md): some settings and
 schedules from before v0.3.0 are now refused or ignored.
 

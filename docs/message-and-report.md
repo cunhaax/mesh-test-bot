@@ -132,6 +132,6 @@ participants from transmitting at once. For a private-channel load test, see
   many there were. Something delivered late
   but received **inside** the session (e.g. after a reconnection) counts normally. If
   the radio's clock isn't set, the packet has no `rxTime` and the bot does not discard it.
-  The `--schedule` startup check (below) also connects briefly and so also drains any
+  The `--schedule` startup check (see [How it works](how-it-works.md)) also connects briefly and so also drains any
   stored messages, but never records or counts them (it isn't listening).
 - **Ignores:** other channels, its own node, and messages that don't start with the prefix.

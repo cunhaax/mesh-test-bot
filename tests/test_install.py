@@ -358,9 +358,11 @@ class InstalledFilesTest(unittest.TestCase):
                "intervalo fixo", "Random-schedule limits")
 
     def test_no_shipped_file_mentions_the_removed_fixed_spacing(self):  # [AC-session-limits-8]
+        # docs/upgrading.md names the removed options on purpose (it is the upgrade note), so it is exempt
         files = [os.path.join(ROOT, "README.md"), os.path.join(ROOT, "defaults.ini"),
-                 os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html"),
-                 os.path.join(ROOT, "docs", "meshmonitor.md")]
+                 os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")]
+        files += [os.path.join(ROOT, "docs", f) for f in os.listdir(os.path.join(ROOT, "docs"))
+                  if f.endswith(".md") and f != "upgrading.md"]
         files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
         for path in files:
             text = read(path).lower()

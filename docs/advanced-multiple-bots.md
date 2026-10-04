@@ -102,5 +102,5 @@ do not overlap before you leave them running.
 ## Updating
 
 ```sh
-docker compose pull && docker compose up -d --force-recreate
+docker compose pull && docker compose up -d
 ```
