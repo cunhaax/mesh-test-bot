@@ -243,15 +243,26 @@ class InstallerTest(unittest.TestCase):
 
     def test_out_of_limit_session_values_are_refused_and_nothing_is_created(self):
         good = dict(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
-        for name, bad, expected in (("MTBOT_LISTEN_MINUTES", "29", "at least 30 minutes"),
-                                    ("MTBOT_MESSAGE_COUNT", "11", "at most 10 messages"),
-                                    ("MTBOT_REPORT_WINDOW_MINUTES", "9", "at least 10 minutes"),
-                                    ("MTBOT_LISTEN_MINUTES", "-5", "whole number")):
+        for name, bad, expected, flag in (("MTBOT_LISTEN_MINUTES", "29", "at least 30 minutes", True),
+                                          ("MTBOT_MESSAGE_COUNT", "11", "at most 10 messages", True),
+                                          ("MTBOT_REPORT_WINDOW_MINUTES", "9", "at least 10 minutes", False),
+                                          ("MTBOT_LISTEN_MINUTES", "-5", "whole number", False),
+                                          ("MTBOT_LISTEN_MINUTES", "9999999", "too large", False)):
             with self.subTest(**{name: bad}):
                 p, out = run_installer(**dict(good, **{name: bad}))
                 self.assertNotEqual(p.returncode, 0)
                 self.assertIn(expected, p.stderr)
+                self.assertEqual("--unsafe-limits" in p.stderr, flag)
                 self.assertFalse(os.path.exists(out))
+
+    def test_values_at_the_limits_are_accepted(self):
+        for listen, count, window in (("30", "10", "10"), ("120", "0", "60")):
+            with self.subTest(listen=listen, count=count, window=window):
+                p, out = run_installer("direct\n10.0.0.7\n\n1\n\nPorto\n\n\n\non-demand\n%s\n%s\n%s\n" % (listen, count, window))
+                self.assertEqual(p.returncode, 0, p.stderr)
+                env = read_env_file(os.path.join(out, ".env"))
+                self.assertEqual((env["MTBOT_LISTEN_MINUTES"], env["MTBOT_MESSAGE_COUNT"], env["MTBOT_REPORT_WINDOW_MINUTES"]),
+                                 (listen, count, window))
 
     def test_session_values_are_asked_and_written_in_scheduled_mode_too(self):
         p, out = run_installer("direct\n10.0.0.7\n\n1\n\nPorto\n\n\n\nscheduled\n45\n5\n20\nsunday\n07:30\n")
@@ -408,7 +419,8 @@ class InstalledFilesTest(unittest.TestCase):
                 for name in re.findall(r"MTBOT_\w+", p.stdout):
                     self.assertIn(name[len(bot.ENV_PREFIX):].lower(), bot.DEFAULTS, name)
                 if env.get("MTB_ONESHOT") == "1":
-                    self.assertIn("MTBOT_LISTEN_MINUTES", p.stdout)
+                    self.assertIn("within 120 min", p.stdout)
+                    self.assertIn("report up to 60 min", p.stdout)
     def test_every_variable_in_env_example_is_a_real_option(self):
         names = set()
         for line in read(os.path.join(INSTALL, "env.example")).splitlines():

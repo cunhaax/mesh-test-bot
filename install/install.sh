@@ -158,6 +158,7 @@ fi
 for v in MTBOT_LISTEN_MINUTES MTBOT_MESSAGE_COUNT MTBOT_REPORT_WINDOW_MINUTES; do
     eval "val=\${$v:-}"
     case $val in *[!0-9]*|'') die "$v must be a whole number: $val" ;; esac
+    [ ${#val} -le 6 ] || die "$v is too large: $val"
 done
 [ "$MTBOT_LISTEN_MINUTES" -ge 30 ] || die "session length must be at least 30 minutes: $MTBOT_LISTEN_MINUTES (for a private-channel load test, run the bot with --unsafe-limits; see the README)"
 [ "$MTBOT_MESSAGE_COUNT" -le 10 ] || die "at most 10 messages: $MTBOT_MESSAGE_COUNT (for a private-channel load test, run the bot with --unsafe-limits; see the README)"
@@ -211,23 +212,24 @@ if [ "$MTB_CONNECTION" = setup ]; then
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  Then, each time you want a session:"
         say "  docker compose run --rm bot --now"
-        say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
-        say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env)."
+        say "    runs one session now: $MTBOT_MESSAGE_COUNT messages at random moments within $MTBOT_LISTEN_MINUTES min,"
+        say "    report up to $MTBOT_REPORT_WINDOW_MINUTES min after that (set in $DIR/.env)."
         say "    The bot container stops, MeshMonitor keeps running."
     else
         say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
     fi
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "  docker compose up -d"
-    say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
-    say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env)."
+    say "    runs one session now: $MTBOT_MESSAGE_COUNT messages at random moments within $MTBOT_LISTEN_MINUTES min,"
+    say "    report up to $MTBOT_REPORT_WINDOW_MINUTES min after that (set in $DIR/.env)."
     say "    The container stops when it is done."
     say "    Run the same command again for another session."
 else
     say "  docker compose up -d"
     if [ "$MTBOT_WEEKDAY" = daily ]; then when="every day"; else when="every $MTBOT_WEEKDAY"; fi
     say "    starts the bot; it runs $when at $MTBOT_START_TIME ($MTBOT_TIMEZONE)"
-    say "    and keeps running until you stop it."
+    say "    and keeps running until you stop it. Each session: $MTBOT_MESSAGE_COUNT messages within"
+    say "    $MTBOT_LISTEN_MINUTES min, report up to $MTBOT_REPORT_WINDOW_MINUTES min after (set in $DIR/.env)."
 fi
 say ""
 say "Other commands, from $DIR:"
