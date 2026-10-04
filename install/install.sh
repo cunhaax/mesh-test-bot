@@ -1,7 +1,7 @@
 #!/bin/sh
 # mesh-test-bot: installer. Asks a few questions (press Enter to accept each
-# default), creates the folder, writes the configuration and starts the bot
-# in Docker.
+# default), creates the folder, writes the configuration and prints the commands
+# that start the bot in Docker. It never starts anything itself.
 #
 #   curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh
 #
@@ -24,7 +24,6 @@
 #   MTB_DIR       folder to create (default ./mesh-test-bot)
 #   MTB_SOURCE    local folder with docker-compose.yml and env.example, instead of downloading them
 #   MTB_RAW_BASE  where to download them from (default GitHub)
-#   MTB_SKIP_START=1   only write the files, do not start Docker
 set -eu
 
 REPO="${MTB_REPO:-cunhaax/mesh-test-bot}"
@@ -65,10 +64,6 @@ fetch() {  # fetch <file> <destination>
     fi
 }
 
-if [ "${MTB_SKIP_START:-}" != 1 ]; then
-    command -v docker >/dev/null 2>&1 || die "Docker is not installed (https://docs.docker.com/get-docker/)"
-    docker compose version >/dev/null 2>&1 || die "missing Docker Compose v2 (the 'docker compose' command)"
-fi
 [ ! -e "$DIR/.env" ] || die "$DIR/.env already exists: edit it by hand, or delete it to start over"
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
@@ -167,31 +162,27 @@ fetch env.example "$DIR/env.example"
         say "MTBOT_START_TIME='$MTBOT_START_TIME'"
     fi
 } > "$DIR/.env"
-say "Done: configuration in $DIR/.env"
+say "Done: configuration in $DIR/.env. Nothing is running yet."
+say ""
+say "To start it, from $DIR:"
 if [ "$MTB_CONNECTION" = setup ]; then
-    say "Starting MeshMonitor + the bot. Open $ALLOWED_ORIGINS, log in with admin / changeme,"
-    say "change the password, and enable the Virtual Node for this radio (port 4404,"
-    say "admin commands OFF) -- see https://github.com/$REPO/blob/master/docs/meshmonitor.md for exact steps."
-    say "The bot retries connecting on its own and will succeed within a few minutes of that."
+    say "  docker compose up -d"
+    say "    starts MeshMonitor and the bot; both keep running (restart: unless-stopped)."
+    say "  Then open $ALLOWED_ORIGINS, log in with admin / changeme, change the password,"
+    say "  and enable the Virtual Node for this radio (port 4404, admin commands OFF):"
+    say "    https://github.com/$REPO/blob/master/docs/meshmonitor.md"
+    say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
 elif [ "$MTB_ONESHOT" = 1 ]; then
-    say "Runs once now, then the container stops (restart it with 'docker compose up -d' again)."
+    say "  docker compose up -d"
+    say "    runs one session now, using the duration and message settings in .env;"
+    say "    the container stops when it is done. Run the same command again for another."
 else
-    say "Schedule: every $MTBOT_WEEKDAY at $MTBOT_START_TIME ($MTBOT_TIMEZONE)."
-    say "  To change it, edit MTBOT_WEEKDAY / MTBOT_START_TIME / MTBOT_TIMEZONE in $DIR/.env."
+    say "  docker compose up -d"
+    say "    starts the bot; it runs every $MTBOT_WEEKDAY at $MTBOT_START_TIME ($MTBOT_TIMEZONE)"
+    say "    and keeps running until you stop it."
 fi
-
-if [ "${MTB_SKIP_START:-}" = 1 ]; then
-    say "(MTB_SKIP_START=1: Docker was not started)"
-    exit 0
-fi
-cd "$DIR"
-docker compose up -d
-sleep 4
 say ""
-say "What the bot is saying:"
-docker compose logs --no-log-prefix --tail 6
-say ""
-say "To follow it live:   cd $DIR && docker compose logs -f --no-log-prefix"
-say "Reports and readings: $DIR/data/"
-say "To stop:              cd $DIR && docker compose down"
-say "To update:            cd $DIR && docker compose pull && docker compose up -d"
+say "Other commands, from $DIR:"
+say "  docker compose logs -f --no-log-prefix    follow the log"
+say "  docker compose down                        stop it"
+say "Reports and readings are written to $DIR/data/."

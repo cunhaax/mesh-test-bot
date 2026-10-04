@@ -177,7 +177,9 @@ existing MeshMonitor, or by setting up a new MeshMonitor right here; see [With
 MeshMonitor](#with-meshmonitor-optional) below), the test channel's index and name,
 your city, the message/report prefixes, and whether to run once now or on a recurring
 weekly schedule — press Enter to accept the default shown in brackets for any of them.
-Creates a `mesh-test-bot/` folder with the configuration, and starts the bot(s). If
+Creates a `mesh-test-bot/` folder with the configuration, and prints the exact
+`docker compose` command that starts it (the installer never starts anything itself:
+you run it, and know what it does). If
 you'd rather read the script before running it, download it and open it: it's about a
 hundred lines.
 

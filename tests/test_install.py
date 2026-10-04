@@ -1,7 +1,7 @@
 # Copyright (C) 2026 André Cunha
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests of the installer and of the files it installs. Docker is never started
-(MTB_SKIP_START=1). Run: python3 -m unittest discover tests"""
+Run: python3 -m unittest discover tests"""
 import os
 import re
 import select
@@ -24,7 +24,7 @@ def run_installer(stdin="", **env):
     """Run install.sh in a temp dir; returns (process, the folder it would create)."""
     out = os.path.join(tempfile.mkdtemp(), "out")
     e = {k: v for k, v in os.environ.items() if not k.startswith(("MTBOT_", "MTB_"))}
-    e.update(MTB_DIR=out, MTB_SOURCE=INSTALL, MTB_SKIP_START="1")
+    e.update(MTB_DIR=out, MTB_SOURCE=INSTALL)
     e.update(env)
     # No controlling terminal: the script must then read its answers from stdin.
     proc = subprocess.run(["sh", os.path.join(INSTALL, "install.sh")], input=stdin, capture_output=True,
@@ -179,12 +179,23 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("MTB_CONNECTION", p.stderr)
         self.assertFalse(os.path.exists(out))
 
+    def test_it_writes_the_config_and_prints_the_commands_without_starting_anything(self):
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        env = {"PATH": "/usr/bin:/bin", "MTB_DIR": out, "MTB_SOURCE": INSTALL, "MTBOT_HOST": "10.0.0.7",
+               "MTBOT_CHANNEL": "1", "MTBOT_CHANNEL_NAME": "C", "MTBOT_PLACE": "Porto", "MTB_ONESHOT": "1"}
+        p = subprocess.run(["sh", os.path.join(INSTALL, "install.sh")], input="", capture_output=True, text=True,
+                           env=env, timeout=30, start_new_session=True)
+        self.assertEqual(p.returncode, 0, p.stderr)  # no Docker on this PATH, and that is fine
+        self.assertTrue(os.path.exists(os.path.join(out, ".env")))
+        self.assertIn("docker compose up -d", p.stdout)
+        self.assertIn("Nothing is running yet", p.stdout)
+
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         self.assertEqual(p.returncode, 0)
         before = read(os.path.join(out, ".env"))
         p2 = subprocess.run(["sh", os.path.join(INSTALL, "install.sh")], capture_output=True, text=True, timeout=30,
-                            start_new_session=True, env=dict(os.environ, MTB_DIR=out, MTB_SOURCE=INSTALL, MTB_SKIP_START="1",
+                            start_new_session=True, env=dict(os.environ, MTB_DIR=out, MTB_SOURCE=INSTALL,
                                                              MTBOT_HOST="9.9.9.9", MTBOT_CHANNEL="1", MTBOT_PLACE="Outro"))
         self.assertNotEqual(p2.returncode, 0)
         self.assertIn("already exists", p2.stderr)
@@ -215,7 +226,7 @@ def run_like_curl_pipe(answers):
     import pty
     out = os.path.join(tempfile.mkdtemp(), "out")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MTBOT_", "MTB_"))}
-    env.update(MTB_DIR=out, MTB_SOURCE=INSTALL, MTB_SKIP_START="1", TERM="dumb")
+    env.update(MTB_DIR=out, MTB_SOURCE=INSTALL, TERM="dumb")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)  # forking with threads around
         pid, fd = pty.fork()
