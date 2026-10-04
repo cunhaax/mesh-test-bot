@@ -111,6 +111,9 @@ case $MTB_ONESHOT in
     0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
     *) die "MTB_ONESHOT must be 1/0 or y/yes/n/no: $MTB_ONESHOT" ;;
 esac
+ask MTBOT_LISTEN_MINUTES "Session length, minutes (at least 30; the messages and listening happen in it)" 120
+ask MTBOT_MESSAGE_COUNT "Number of messages (at most 10)" 3
+ask MTBOT_REPORT_WINDOW_MINUTES "Report window after the session, minutes (at least 10)" 60
 if [ "$MTB_ONESHOT" = 0 ]; then
     ask MTBOT_WEEKDAY "Day of the week to run (monday..sunday, or 'daily')" saturday
     ask MTBOT_START_TIME "Start time, 24h (HH:MM)" 06:00
@@ -152,6 +155,15 @@ if [ "$MTB_ONESHOT" = 0 ]; then
         *) die "start time must be HH:MM (24h, 00:00 to 23:59): $MTBOT_START_TIME" ;; esac
 fi
 
+for v in MTBOT_LISTEN_MINUTES MTBOT_MESSAGE_COUNT MTBOT_REPORT_WINDOW_MINUTES; do
+    eval "val=\${$v:-}"
+    case $val in *[!0-9]*|'') die "$v must be a whole number: $val" ;; esac
+    [ ${#val} -le 6 ] || die "$v is too large: $val"
+done
+[ "$MTBOT_LISTEN_MINUTES" -ge 30 ] || die "session length must be at least 30 minutes: $MTBOT_LISTEN_MINUTES (for a private-channel load test, run the bot with --unsafe-limits; see the README)"
+[ "$MTBOT_MESSAGE_COUNT" -le 10 ] || die "at most 10 messages: $MTBOT_MESSAGE_COUNT (for a private-channel load test, run the bot with --unsafe-limits; see the README)"
+[ "$MTBOT_REPORT_WINDOW_MINUTES" -ge 10 ] || die "report window must be at least 10 minutes: $MTBOT_REPORT_WINDOW_MINUTES"
+
 mkdir -p "$DIR/data"
 if [ "$MTB_CONNECTION" = setup ]; then
     fetch with-meshmonitor.yml "$DIR/docker-compose.yml"
@@ -175,6 +187,9 @@ fetch env.example "$DIR/env.example"
     say "MTBOT_KEYWORD='$MTBOT_KEYWORD'"
     say "MTBOT_REPORT_PREFIX='$MTBOT_REPORT_PREFIX'"
     say "MTBOT_TIMEZONE='$MTBOT_TIMEZONE'"
+    say "MTBOT_LISTEN_MINUTES='$MTBOT_LISTEN_MINUTES'"
+    say "MTBOT_MESSAGE_COUNT='$MTBOT_MESSAGE_COUNT'"
+    say "MTBOT_REPORT_WINDOW_MINUTES='$MTBOT_REPORT_WINDOW_MINUTES'"
     if [ "$MTB_ONESHOT" = 0 ]; then
         say "MTBOT_WEEKDAY='$MTBOT_WEEKDAY'"
         say "MTBOT_START_TIME='$MTBOT_START_TIME'"
@@ -197,23 +212,24 @@ if [ "$MTB_CONNECTION" = setup ]; then
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  Then, each time you want a session:"
         say "  docker compose run --rm bot --now"
-        say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
-        say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env; defaults 120 and 60)."
+        say "    runs one session now: $MTBOT_MESSAGE_COUNT messages at random moments within $MTBOT_LISTEN_MINUTES min,"
+        say "    report up to $MTBOT_REPORT_WINDOW_MINUTES min after that (set in $DIR/.env)."
         say "    The bot container stops, MeshMonitor keeps running."
     else
         say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
     fi
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "  docker compose up -d"
-    say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
-    say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env; defaults 120 and 60)."
+    say "    runs one session now: $MTBOT_MESSAGE_COUNT messages at random moments within $MTBOT_LISTEN_MINUTES min,"
+    say "    report up to $MTBOT_REPORT_WINDOW_MINUTES min after that (set in $DIR/.env)."
     say "    The container stops when it is done."
     say "    Run the same command again for another session."
 else
     say "  docker compose up -d"
     if [ "$MTBOT_WEEKDAY" = daily ]; then when="every day"; else when="every $MTBOT_WEEKDAY"; fi
     say "    starts the bot; it runs $when at $MTBOT_START_TIME ($MTBOT_TIMEZONE)"
-    say "    and keeps running until you stop it."
+    say "    and keeps running until you stop it. Each session: $MTBOT_MESSAGE_COUNT messages within"
+    say "    $MTBOT_LISTEN_MINUTES min, report up to $MTBOT_REPORT_WINDOW_MINUTES min after (set in $DIR/.env)."
 fi
 say ""
 say "Other commands, from $DIR:"
