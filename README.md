@@ -267,6 +267,13 @@ Numeric values go in quotes, so YAML keeps them as text.
 
 ## Upgrading from an older version
 
+**First, get the new image.** Compose only uses the image it already has, so an older
+install keeps running the old version until you pull:
+
+```sh
+docker compose pull && docker compose up -d --force-recreate
+```
+
 Before the session limits, scheduled installs could use shorter sessions, a `random_schedule`
 setting and `--fixed-schedule`. Now:
 
