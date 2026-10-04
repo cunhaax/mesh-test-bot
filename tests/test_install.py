@@ -152,7 +152,7 @@ class InstallerTest(unittest.TestCase):
         for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):
             self.assertNotIn(name, env)
         self.assertIn("docker compose up -d meshmonitor", p.stdout)
-        self.assertIn("docker compose run --rm bot --now", p.stdout)
+        self.assertIn("docker compose run --rm bot --now --fixed-schedule", p.stdout)
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "with-meshmonitor.yml")))
 

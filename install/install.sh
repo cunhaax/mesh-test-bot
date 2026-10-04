@@ -173,7 +173,7 @@ if [ "$MTB_CONNECTION" = setup ]; then
     say "    https://github.com/$REPO/blob/master/docs/meshmonitor.md"
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  Then, each time you want a session:"
-        say "  docker compose run --rm bot --now"
+        say "  docker compose run --rm bot --now --fixed-schedule"
         say "    runs one session now, using the duration and message settings in .env;"
         say "    the bot container stops when it is done. MeshMonitor keeps running."
     else
