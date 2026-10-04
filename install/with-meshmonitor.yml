@@ -20,8 +20,9 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      # The web UI, this machine only. To open it from elsewhere, see the guide.
-      - "127.0.0.1:8080:3001"
+      # The web UI, on every network interface of this machine (your LAN included). Change the
+      # default password (admin / changeme) before anyone else can reach it.
+      - "8080:3001"
       # do NOT publish 4404 (the Virtual Node): it has no authentication. The bot reaches
       # it over Docker's internal network, by the name "meshmonitor".
     volumes:

@@ -455,7 +455,7 @@ class InstalledFilesTest(unittest.TestCase):
         import yaml
         services = yaml.safe_load(read(os.path.join(INSTALL, "with-meshmonitor.yml")))["services"]
         ports = [str(p) for p in services["meshmonitor"]["ports"]]
-        self.assertTrue(all(p.startswith("127.0.0.1:") for p in ports))  # the web interface: this machine only
+        self.assertEqual(ports, ["8080:3001"])  # the web interface, reachable on the LAN; the password must be changed
         self.assertFalse(any("4404" in p for p in ports))  # the virtual node has no authentication: never published
         self.assertEqual(services["bot"]["env_file"], ".env")
         self.assertEqual(services["meshmonitor"]["env_file"], ".env")
