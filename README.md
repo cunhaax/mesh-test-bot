@@ -318,8 +318,9 @@ when asked how to connect, or "through an existing MeshMonitor" if you already r
 one elsewhere and just need to point the bot at its Virtual Node's address. Doing it
 by hand is just pointing `MTBOT_HOST` and `MTBOT_PORT` at it: there's an [example
 `docker-compose`](install/with-meshmonitor.yml) and a [guide](docs/meshmonitor.md)
-with the steps, the caveats and what was tested. MeshMonitor is an independent project
-and this bot is not affiliated with or endorsed by it.
+with the steps, the caveats and what was tested. To run several scheduled tests through
+the same MeshMonitor, see [several scheduled bots](docs/advanced-multiple-bots.md).
+MeshMonitor is an independent project and this bot is not affiliated with or endorsed by it.
 
 ## Configuration
 

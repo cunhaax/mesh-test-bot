@@ -42,9 +42,8 @@
   <div class="grid">
     <div class="card">
       <h3>📤 Envia, com agenda</h3>
-      <p>Umas mensagens curtas no teu canal de testes, espalhadas em momentos aleatórios
-      para que uma comunidade inteira não emita ao mesmo tempo. Cada sessão tem limites (no máximo 10 mensagens, pelo menos 30 minutos de escuta, pelo menos 10 minutos para o relatório); um teste
-      de carga num canal privado pode levantar alguns com <code>--unsafe-limits</code>, ver o README.</p>
+      <p>Umas mensagens curtas no teu canal de testes, em momentos aleatórios, para que uma
+      comunidade inteira não emita ao mesmo tempo.</p>
     </div>
     <div class="card">
       <h3>👂 Escuta o tempo todo</h3>
@@ -60,6 +59,11 @@
       <h3>🤖 Corre sozinho</h3>
       <p>Imagem Docker para amd64, arm64 e arm/v7 (Raspberry Pi incluída). Repete-se
       todas as semanas, e recupera sozinho de reinícios do rádio e quedas de WiFi.</p>
+    </div>
+    <div class="card">
+      <h3>🗂️ Vários testes, um rádio</h3>
+      <p>Corre mais do que um teste agendado: um bot por teste, cada um com o seu horário,
+      através do mesmo MeshMonitor. <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/advanced-multiple-bots.md">Como configurar</a> (em inglês).</p>
     </div>
   </div>
 
@@ -143,8 +147,9 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
     (Semtech AN1200.13) multiplicada por uma estimativa de quantas vezes cada mensagem é
     retransmitida no ar. Não é garantia, e não é imposto pelo bot em si —
     <code>message_count</code> tem um máximo de 10 e <code>listen_minutes</code> tem um
-    mínimo de 30 minutos, independentemente desta calculadora (ver "Session
-    limits" no README).</p>
+    mínimo de 30 minutos, e o relatório tem pelo menos 10 minutos, independentemente desta
+    calculadora. Um teste de carga num canal privado pode levantar os dois primeiros com
+    <code>--unsafe-limits</code> (ver "Session limits" no README).</p>
   </div>
 
   <h2>Ligações</h2>
