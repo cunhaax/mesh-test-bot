@@ -176,8 +176,8 @@ curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/instal
 Asks a few questions — how the bot should reach the radio (directly, through an
 existing MeshMonitor, or by setting up a new MeshMonitor right here; see [With
 MeshMonitor](#with-meshmonitor-optional) below), the test channel's index and name,
-your city, the message/report prefixes, and whether to run on a recurring weekly
-schedule or on demand — press Enter to accept the default shown in brackets for any of them.
+your city, the message/report prefixes, the session length, number of messages and report
+window, and whether to run on a recurring weekly schedule or on demand — press Enter to accept the default shown in brackets for any of them.
 Creates a `mesh-test-bot/` folder with the configuration, and prints the exact
 `docker compose` commands that start it (the installer never starts anything itself:
 you run it, and know what it does). If

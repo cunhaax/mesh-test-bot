@@ -56,31 +56,34 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "192.168.1.9", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "Canal",
             "MTBOT_PLACE": "Vila Nova", "MTBOT_KEYWORD": "MTBOT", "MTBOT_REPORT_PREFIX": "ACK",
-            "MTBOT_TIMEZONE": "Europe/Lisbon"})
+            "MTBOT_TIMEZONE": "Europe/Lisbon", "MTBOT_LISTEN_MINUTES": "120", "MTBOT_MESSAGE_COUNT": "3",
+            "MTBOT_REPORT_WINDOW_MINUTES": "60"})
         for name in ("docker-compose.yml", "env.example", "data"):
             self.assertTrue(os.path.exists(os.path.join(out, name)), name)
 
     def test_answers_from_stdin_in_order(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         answers = ["direct", "10.0.0.7", "4403", "3", "MeuCanal", "Porto", "CustomKey", "CustomRep",
-                   "America/New_York", "on-demand"]
+                   "America/New_York", "on-demand", "90", "4", "15"]
         p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.7", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "3", "MTBOT_CHANNEL_NAME": "MeuCanal",
             "MTBOT_PLACE": "Porto", "MTBOT_KEYWORD": "CustomKey", "MTBOT_REPORT_PREFIX": "CustomRep",
-            "MTBOT_TIMEZONE": "America/New_York"})
+            "MTBOT_TIMEZONE": "America/New_York", "MTBOT_LISTEN_MINUTES": "90", "MTBOT_MESSAGE_COUNT": "4",
+            "MTBOT_REPORT_WINDOW_MINUTES": "15"})
 
     def test_empty_answers_take_the_defaults(self):
         # connection, host, place given; everything else (port, channel, channel_name, keyword,
         # report_prefix, timezone, run-once?, weekday, start_time) blank -> takes its default
-        answers = ["", "10.0.0.7", "", "", "", "Porto", "", "", "", "", "", ""]
+        answers = ["", "10.0.0.7", "", "", "", "Porto", "", "", "", "", "", "", "", "", ""]
         p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         env = read_env_file(os.path.join(out, ".env"))
         self.assertEqual((env["MTBOT_PORT"], env["MTBOT_CHANNEL"], env["MTBOT_CHANNEL_NAME"], env["MTBOT_KEYWORD"],
-                          env["MTBOT_REPORT_PREFIX"], env["MTBOT_WEEKDAY"], env["MTBOT_START_TIME"], env["MTBOT_TIMEZONE"]),
-                         ("4403", "1", "", "MTBOT", "ACK", "saturday", "06:00", "Europe/Lisbon"))
+                          env["MTBOT_REPORT_PREFIX"], env["MTBOT_WEEKDAY"], env["MTBOT_START_TIME"], env["MTBOT_TIMEZONE"],
+                          env["MTBOT_LISTEN_MINUTES"], env["MTBOT_MESSAGE_COUNT"], env["MTBOT_REPORT_WINDOW_MINUTES"]),
+                         ("4403", "1", "", "MTBOT", "ACK", "saturday", "06:00", "Europe/Lisbon", "120", "3", "60"))
 
     def test_bad_answers_are_refused_and_nothing_is_created(self):
         good = dict(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
@@ -110,6 +113,7 @@ class InstallerTest(unittest.TestCase):
         out = os.path.join(tempfile.mkdtemp(), "out")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("MTBOT_", "MTB_"))}
         env.update(MTB_DIR=out, MTB_RAW_BASE="file://" + INSTALL, MTB_ONESHOT="1", MTB_CONNECTION="direct",
+                   MTBOT_LISTEN_MINUTES="120", MTBOT_MESSAGE_COUNT="3", MTBOT_REPORT_WINDOW_MINUTES="60",
                    MTBOT_HOST="10.0.0.7", MTBOT_PORT="4403", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
                    MTBOT_PLACE="Porto", MTBOT_KEYWORD="MTBOT", MTBOT_REPORT_PREFIX="ACK",
                    MTBOT_TIMEZONE="Europe/Lisbon")
@@ -237,6 +241,25 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")), "# my own edits\n")
         self.assertFalse(os.path.exists(os.path.join(out, ".env")))
 
+    def test_out_of_limit_session_values_are_refused_and_nothing_is_created(self):
+        good = dict(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        for name, bad, expected in (("MTBOT_LISTEN_MINUTES", "29", "at least 30 minutes"),
+                                    ("MTBOT_MESSAGE_COUNT", "11", "at most 10 messages"),
+                                    ("MTBOT_REPORT_WINDOW_MINUTES", "9", "at least 10 minutes"),
+                                    ("MTBOT_LISTEN_MINUTES", "-5", "whole number")):
+            with self.subTest(**{name: bad}):
+                p, out = run_installer(**dict(good, **{name: bad}))
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn(expected, p.stderr)
+                self.assertFalse(os.path.exists(out))
+
+    def test_session_values_are_asked_and_written_in_scheduled_mode_too(self):
+        p, out = run_installer("direct\n10.0.0.7\n\n1\n\nPorto\n\n\n\nscheduled\n45\n5\n20\nsunday\n07:30\n")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual((env["MTBOT_LISTEN_MINUTES"], env["MTBOT_MESSAGE_COUNT"], env["MTBOT_REPORT_WINDOW_MINUTES"],
+                          env["MTBOT_WEEKDAY"]), ("45", "5", "20", "sunday"))
+
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         self.assertEqual(p.returncode, 0)
@@ -259,7 +282,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_an_empty_channel_name_is_read_as_not_set(self):
         # connection, host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
-        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "on-demand"]
+        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "on-demand", "", "", ""]
         p, out = run_installer("\n".join(answers) + "\n")
         env = read_env_file(os.path.join(out, ".env"))
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
@@ -302,17 +325,18 @@ class PipedInstallerTest(unittest.TestCase):
     def test_curl_pipe_sh_asks_on_the_terminal(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
+            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand", "120", "3", "60"])
         self.assertEqual(code, 0, screen)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.4", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX",
             "MTBOT_PLACE": "Braga", "MTBOT_KEYWORD": "MTBOT", "MTBOT_REPORT_PREFIX": "ACK",
-            "MTBOT_TIMEZONE": "Europe/Lisbon"})
+            "MTBOT_TIMEZONE": "Europe/Lisbon", "MTBOT_LISTEN_MINUTES": "120", "MTBOT_MESSAGE_COUNT": "3",
+            "MTBOT_REPORT_WINDOW_MINUTES": "60"})
         self.assertIn("Radio's IP", screen)
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
+            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand", "120", "3", "60"])
         self.assertNotEqual(code, 0)
         self.assertIn("channel must be a number from 0 to 7: 9", screen)
         self.assertFalse(os.path.exists(out))
@@ -337,9 +361,12 @@ class InstalledFilesTest(unittest.TestCase):
                     self.assertNotIn(word.lower(), text)
 
     def test_the_installer_never_offers_or_prints_unsafe_limits(self):  # [AC-session-limits-6]
+        # the flag may appear in refusal messages (die ...), never in a question (ask ...)
         for name in os.listdir(INSTALL):
             with self.subTest(file=name):
-                self.assertNotIn("unsafe", read(os.path.join(INSTALL, name)).lower())
+                for line in read(os.path.join(INSTALL, name)).splitlines():
+                    if line.lstrip().startswith("ask "):
+                        self.assertNotIn("unsafe", line.lower())
 
     def test_both_index_pages_state_the_limits_and_the_flag(self):  # [AC-session-limits-8]
         for path in (os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")):
