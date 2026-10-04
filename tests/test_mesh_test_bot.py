@@ -1314,7 +1314,8 @@ class SessionTest(unittest.TestCase):
                                                                rssi=-98, hop_start=3, hop_limit=3), interface=iface)
         threading.Thread(target=deliver, daemon=True).start()
 
-        with mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"):
+        with mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"), \
+                mock.patch.object(bot.random, "random", lambda: 0.5):  # the one message at the middle of its window
             bot.run_window(cfg, start, end, factory=lambda host, port: iface)
 
         self.assertEqual(iface.sent, [("MTBOT | 270f | Lisboa | 1/1", 2, False)])  # my_num 9999 = 0x270f
@@ -1554,7 +1555,7 @@ class SessionLimitsTest(unittest.TestCase):
             t = bot.plan_send_times(cfg, start, end, random.Random(seed))
             self.assertEqual(len(t), 20)
             self.assertTrue(all(b - a >= timedelta(seconds=7.5) for a, b in zip(t, t[1:])))
-            self.assertGreater(t[-1], end - timedelta(seconds=30))  # reaches the final stretch
+            self.assertGreaterEqual(t[-1], start + (end - start) * 19 / 20)  # the last one is in the final segment
 
     def test_unsafe_limits_warns_listing_exactly_the_relaxed_limits(self):  # [AC-session-limits-5]
         with self.assertLogs("bot", "WARNING") as logs:
@@ -1599,7 +1600,7 @@ class SessionLimitsTest(unittest.TestCase):
         self.assertEqual(cfg["min_gap_seconds"], 120.0)
         self.assertTrue(any("now 120 s" in r for r in logs.output))
 
-    def test_non_finite_limits_are_refused(self):  # [EDGE-session-limits-13 from review F6]
+    def test_non_finite_limits_are_refused(self):  # [AC-session-limits-2] (review F6)
         for ini in ("listen_minutes = nan\n", "report_window_minutes = inf\n", "listen_minutes = inf\n"):
             with self.subTest(ini=ini), self.assertRaises(SystemExit):
                 self.load(ini)

@@ -98,7 +98,8 @@ counterproductive. So, by default:
 
 - **Messages:** the emission window is split into `message_count` equal parts and each message
   falls at a **random** moment of its own part. They end up spread out, and **never
-  two in a row closer than 2 minutes** (fixed, not configurable).
+  two in a row closer than 2 minutes** (unless `--unsafe-limits` is used, see
+  [Session limits](#session-limits)).
 - **Report:** comes out at a random moment between the end of the emission window and
   `report_window_minutes` later, never closer than 2 minutes to the last message. The
   bot keeps listening until then, which also catches delayed messages.
@@ -264,6 +265,22 @@ services:
 
 Numeric values go in quotes, so YAML keeps them as text.
 
+## Upgrading from an older version
+
+Before the session limits, scheduled installs could use shorter sessions, a `random_schedule`
+setting and `--fixed-schedule`. Now:
+
+- A session with `listen_minutes` below 30, `report_window_minutes` below 10 or
+  `message_count` above 10 refuses to start. Under Docker, that shows up as a container that
+  keeps restarting: `docker compose logs` says which limit it is. Raise the values in
+  `data/bot.ini` (or `.env`), or, on a private channel only, add `--unsafe-limits` to the
+  compose `command:`.
+- `random_schedule` and `interval_minutes` no longer exist; the bot warns about them and
+  ignores them. Messages always go out at random moments.
+- On-demand runs in `docker-compose.yml` (`command: ["--now", "--fixed-schedule"]`) and
+  `docker compose run --rm bot --now --fixed-schedule` must drop `--fixed-schedule`. The bot
+  refuses that flag and says so.
+
 ## Installing without Docker
 
 Needs Python 3.9+ and the `meshtastic` library (pinned in `requirements.txt`).
@@ -391,7 +408,7 @@ it on a channel other people use. For a scheduled load test, put it in the compo
 - **What can still be lost:** only whatever the radio transmits while the connection
   is down, usually around 1 second. If there are outages, the report says how many
   there were and how much time they added up to.
-- **Two of our messages are never closer than 2 minutes** (fixed, not configurable),
+- **Two of our messages are never closer than 2 minutes** (unless `--unsafe-limits` is used),
   even across a connection outage.
 - The bot depends on the packets' fields and on the library's reconnection behaviour,
   so `requirements.txt` pins its version. Only bump it after testing.

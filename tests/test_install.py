@@ -317,13 +317,39 @@ class InstalledFilesTest(unittest.TestCase):
                  os.path.join(ROOT, "docs", "meshmonitor.md")]
         files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
         for path in files:
-            text = read(path).lower()
+            text = read(path)
+            if path.endswith("README.md"):  # the upgrade note names them on purpose
+                text = text[:text.index("## Upgrading from an older version")] + text[text.index("## Installing without Docker"):]
+            text = text.lower()
             for word in self.REMOVED:
                 with self.subTest(file=os.path.basename(path), word=word):
                     self.assertNotIn(word.lower(), text)
 
     def test_the_installer_never_offers_or_prints_unsafe_limits(self):  # [AC-session-limits-6]
-        self.assertNotIn("unsafe", read(os.path.join(INSTALL, "install.sh")).lower())
+        for name in os.listdir(INSTALL):
+            with self.subTest(file=name):
+                self.assertNotIn("unsafe", read(os.path.join(INSTALL, name)).lower())
+
+    def test_both_index_pages_state_the_limits_and_the_flag(self):  # [AC-session-limits-8]
+        for path in (os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")):
+            with self.subTest(file=path):
+                text = read(path)
+                self.assertIn("--unsafe-limits", text)
+                self.assertIn("10", text)
+                self.assertIn("30", text)
+
+    def test_a_fresh_on_demand_install_is_not_refused_by_the_limits(self):  # [EDGE-session-limits-11]
+        import yaml
+        p, out = run_installer(MTB_ONESHOT="1", MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1",
+                               MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        command = yaml.safe_load(read(os.path.join(out, "docker-compose.yml")))["services"]["bot"]["command"]
+        env = read_env_file(os.path.join(out, ".env"))
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
+        with mock.patch.dict(os.environ, dict(clean, **env), clear=True):
+            cfg = bot.load_config(["--config", "/nonexistent.ini"] + command)[0]
+        self.assertEqual(cfg["min_gap_seconds"], 120.0)
+        self.assertEqual(cfg["message_count"], 3)
 
     def test_printed_commands_name_only_real_options_and_no_removed_flags(self):  # [AC-session-limits-7]
         for env in (dict(MTB_ONESHOT="1"), dict(MTB_ONESHOT="0", MTBOT_WEEKDAY="sunday", MTBOT_START_TIME="07:30"),
