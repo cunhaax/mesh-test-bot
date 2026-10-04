@@ -197,7 +197,8 @@ fetch env.example "$DIR/env.example"
 } > "$DIR/.env"
 say "Done: configuration in $DIR/.env. Nothing is running yet."
 say ""
-say "To start it, from $DIR:"
+say "To start it, from $DIR (this pulls the latest image first):"
+say "  docker compose pull"
 if [ "$MTB_CONNECTION" = setup ]; then
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  docker compose up -d meshmonitor"
