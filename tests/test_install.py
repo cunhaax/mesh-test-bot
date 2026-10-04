@@ -383,7 +383,7 @@ class InstalledFilesTest(unittest.TestCase):
         for path in (os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")):
             with self.subTest(file=path):
                 text = read(path)
-                self.assertIn("--unsafe-limits", text)
+                self.assertNotIn("unsafe", text.lower())  # the landing pages never point at the flag
                 if path.endswith("pt/index.html"):
                     self.assertIn("máximo de 10", text)
                     self.assertIn("mínimo de 30 minutos", text)
