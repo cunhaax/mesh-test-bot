@@ -63,7 +63,7 @@ class InstallerTest(unittest.TestCase):
     def test_answers_from_stdin_in_order(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         answers = ["direct", "10.0.0.7", "4403", "3", "MeuCanal", "Porto", "CustomKey", "CustomRep",
-                   "America/New_York", "y"]
+                   "America/New_York", "on-demand"]
         p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
@@ -259,7 +259,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_an_empty_channel_name_is_read_as_not_set(self):
         # connection, host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
-        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "y"]
+        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "on-demand"]
         p, out = run_installer("\n".join(answers) + "\n")
         env = read_env_file(os.path.join(out, ".env"))
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
@@ -302,7 +302,7 @@ class PipedInstallerTest(unittest.TestCase):
     def test_curl_pipe_sh_asks_on_the_terminal(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
         self.assertEqual(code, 0, screen)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.4", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX",
@@ -312,7 +312,7 @@ class PipedInstallerTest(unittest.TestCase):
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
         self.assertNotEqual(code, 0)
         self.assertIn("channel must be a number from 0 to 7: 9", screen)
         self.assertFalse(os.path.exists(out))

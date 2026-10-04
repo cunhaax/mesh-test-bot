@@ -97,7 +97,15 @@ ask MTBOT_PLACE "Where you are (city)"
 ask MTBOT_KEYWORD "Message prefix (tags this bot's messages; may be several words)" MTBOT
 ask MTBOT_REPORT_PREFIX "Report-line prefix (starts every line of the readable report)" ACK
 ask MTBOT_TIMEZONE "IANA timezone for report timestamps (e.g. Europe/Lisbon)" Europe/Lisbon
-ask MTB_ONESHOT "Run on demand (one session when you start it) instead of on a recurring weekly schedule?" n
+if [ -z "${MTB_ONESHOT:-}" ]; then
+    ask MTB_RUN "How should it run: scheduled (every week, keeps running) or on-demand (you start each session)? [scheduled/on-demand]" scheduled
+    MTB_RUN=$(printf '%s' "$MTB_RUN" | tr 'A-Z' 'a-z')
+    case $MTB_RUN in
+        scheduled|s) MTB_ONESHOT=0 ;;
+        on-demand|ondemand|o) MTB_ONESHOT=1 ;;
+        *) die "run mode must be scheduled or on-demand: $MTB_RUN" ;;
+    esac
+fi
 case $MTB_ONESHOT in
     1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
     0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
