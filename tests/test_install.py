@@ -142,15 +142,26 @@ class InstallerTest(unittest.TestCase):
         env = read_env_file(os.path.join(out, ".env"))
         self.assertEqual(env["MTBOT_PORT"], "4404")  # took the "existing" branch's default, not "direct"'s 4403
 
-    def test_setup_mode_silently_overrides_a_preset_oneshot_and_host(self):
+    def test_setup_mode_fixes_host_and_port_but_keeps_the_on_demand_choice(self):
         p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",
                                 MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1",
                                 MTBOT_HOST="1.2.3.4", MTBOT_PORT="9999")
         self.assertEqual(p.returncode, 0, p.stderr)
         env = read_env_file(os.path.join(out, ".env"))
         self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor", "4404"))
-        for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):  # still recurring, oneshot=1 was overridden too
-            self.assertIn(name, env)
+        for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):
+            self.assertNotIn(name, env)
+        self.assertIn("docker compose up -d meshmonitor", p.stdout)
+        self.assertIn("docker compose run --rm bot --now", p.stdout)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "with-meshmonitor.yml")))
+
+    def test_setup_mode_scheduled_prints_the_full_stack_start(self):
+        p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="0")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("docker compose up -d\n", p.stdout)
+        self.assertNotIn("run --rm bot --now", p.stdout)
 
     def test_setup_meshmonitor_connection_fixes_the_bot_at_the_virtual_node(self):
         p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",

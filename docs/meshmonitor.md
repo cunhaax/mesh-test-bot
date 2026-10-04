@@ -30,7 +30,7 @@ opening any connection to the radio).
 
 **With the installer**: run `install.sh` (see the README's Quick Install) and answer
 "set up a new MeshMonitor here" when asked how the bot should connect. It writes the
-`.env` below for you and starts both services.
+`.env` below for you and prints the commands to start them (nothing starts until you run them).
 
 **By hand**:
 

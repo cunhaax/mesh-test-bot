@@ -17,10 +17,9 @@
 #   MTBOT_TIMEZONE   answers, skip the matching prompt
 #   MESHTASTIC_NODE_IP, ALLOWED_ORIGINS   only with MTB_CONNECTION=setup (MeshMonitor's own settings)
 #   MTB_ONESHOT=1  skip the weekday/start-time prompts, run once now instead
-#                  (1/0 or y/yes/n/no only -- anything else stops the install; not
-#                  asked at all with MTB_CONNECTION=setup, which is always recurring
-#                  and also always fixes MTBOT_HOST/MTBOT_PORT at meshmonitor:4404,
-#                  silently overriding any pre-set value for those three)
+#                  (1/0 or y/yes/n/no only -- anything else stops the install)
+#                  With MTB_CONNECTION=setup, MTBOT_HOST/MTBOT_PORT are always fixed at
+#                  meshmonitor:4404, silently overriding any pre-set value for those two.
 #   MTB_DIR       folder to create (default ./mesh-test-bot)
 #   MTB_SOURCE    local folder with docker-compose.yml and env.example, instead of downloading them
 #   MTB_RAW_BASE  where to download them from (default GitHub)
@@ -94,16 +93,12 @@ ask MTBOT_PLACE "Where you are (city)"
 ask MTBOT_KEYWORD "Message prefix (tags this bot's messages; may be several words)" MTBOT
 ask MTBOT_REPORT_PREFIX "Report-line prefix (starts every line of the readable report)" ACK
 ask MTBOT_TIMEZONE "IANA timezone for report timestamps (e.g. Europe/Lisbon)" Europe/Lisbon
-if [ "$MTB_CONNECTION" = setup ]; then
-    MTB_ONESHOT=0  # a new MeshMonitor setup is a permanent installation, not a quick test
-else
-    ask MTB_ONESHOT "Run once right now instead of on a recurring weekly schedule?" n
-    case $MTB_ONESHOT in
-        1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
-        0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
-        *) die "MTB_ONESHOT must be 1/0 or y/yes/n/no: $MTB_ONESHOT" ;;
-    esac
-fi
+ask MTB_ONESHOT "Run on demand (one session when you start it) instead of on a recurring weekly schedule?" n
+case $MTB_ONESHOT in
+    1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
+    0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
+    *) die "MTB_ONESHOT must be 1/0 or y/yes/n/no: $MTB_ONESHOT" ;;
+esac
 if [ "$MTB_ONESHOT" = 0 ]; then
     ask MTBOT_WEEKDAY "Day of the week to run (monday..sunday, or 'daily')" saturday
     ask MTBOT_START_TIME "Start time, 24h (HH:MM)" 06:00
@@ -166,12 +161,24 @@ say "Done: configuration in $DIR/.env. Nothing is running yet."
 say ""
 say "To start it, from $DIR:"
 if [ "$MTB_CONNECTION" = setup ]; then
-    say "  docker compose up -d"
-    say "    starts MeshMonitor and the bot; both keep running (restart: unless-stopped)."
+    if [ "$MTB_ONESHOT" = 1 ]; then
+        say "  docker compose up -d meshmonitor"
+        say "    starts MeshMonitor only; it keeps running."
+    else
+        say "  docker compose up -d"
+        say "    starts MeshMonitor and the bot; both keep running (restart: unless-stopped)."
+    fi
     say "  Then open $ALLOWED_ORIGINS, log in with admin / changeme, change the password,"
     say "  and enable the Virtual Node for this radio (port 4404, admin commands OFF):"
     say "    https://github.com/$REPO/blob/master/docs/meshmonitor.md"
-    say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
+    if [ "$MTB_ONESHOT" = 1 ]; then
+        say "  Then, each time you want a session:"
+        say "  docker compose run --rm bot --now"
+        say "    runs one session now, using the duration and message settings in .env;"
+        say "    the bot container stops when it is done. MeshMonitor keeps running."
+    else
+        say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
+    fi
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "  docker compose up -d"
     say "    runs one session now, using the duration and message settings in .env;"
