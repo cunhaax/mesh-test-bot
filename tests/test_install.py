@@ -335,8 +335,9 @@ class InstalledFilesTest(unittest.TestCase):
             with self.subTest(file=path):
                 text = read(path)
                 self.assertIn("--unsafe-limits", text)
-                self.assertIn("10", text)
-                self.assertIn("30", text)
+                self.assertIn("at most 10 messages", text)
+                self.assertIn("at least 30 minutes", text)
+                self.assertIn("at least 10 minutes", text)
 
     def test_a_fresh_on_demand_install_is_not_refused_by_the_limits(self):  # [EDGE-session-limits-11]
         import yaml
