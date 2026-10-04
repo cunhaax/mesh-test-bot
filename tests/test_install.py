@@ -177,7 +177,7 @@ class InstallerTest(unittest.TestCase):
         for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):
             self.assertNotIn(name, env)
         self.assertIn("docker compose up -d meshmonitor", p.stdout)
-        self.assertIn("docker compose run --rm bot --now --fixed-schedule", p.stdout)
+        self.assertIn("docker compose run --rm bot --now\n", p.stdout)
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "with-meshmonitor.yml")))
 
@@ -308,6 +308,37 @@ class PipedInstallerTest(unittest.TestCase):
 
 
 class InstalledFilesTest(unittest.TestCase):
+    REMOVED = ("fixed-schedule", "random_schedule", "interval_minutes", "INTERVAL_MINUTES", "fixed interval",
+               "intervalo fixo", "Random-schedule limits")
+
+    def test_no_shipped_file_mentions_the_removed_fixed_spacing(self):  # [AC-session-limits-8]
+        files = [os.path.join(ROOT, "README.md"), os.path.join(ROOT, "defaults.ini"),
+                 os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html"),
+                 os.path.join(ROOT, "docs", "meshmonitor.md")]
+        files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
+        for path in files:
+            text = read(path).lower()
+            for word in self.REMOVED:
+                with self.subTest(file=os.path.basename(path), word=word):
+                    self.assertNotIn(word.lower(), text)
+
+    def test_the_installer_never_offers_or_prints_unsafe_limits(self):  # [AC-session-limits-6]
+        self.assertNotIn("unsafe", read(os.path.join(INSTALL, "install.sh")).lower())
+
+    def test_printed_commands_name_only_real_options_and_no_removed_flags(self):  # [AC-session-limits-7]
+        for env in (dict(MTB_ONESHOT="1"), dict(MTB_ONESHOT="0", MTBOT_WEEKDAY="sunday", MTBOT_START_TIME="07:30"),
+                    dict(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTB_ONESHOT="1"),
+                    dict(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTB_ONESHOT="0",
+                         MTBOT_WEEKDAY="sunday", MTBOT_START_TIME="07:30")):
+            with self.subTest(**env):
+                p, _ = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
+                                     MTBOT_PLACE="Porto", **env)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertNotIn("fixed-schedule", p.stdout)
+                for name in re.findall(r"MTBOT_\w+", p.stdout):
+                    self.assertIn(name[len(bot.ENV_PREFIX):].lower(), bot.DEFAULTS, name)
+                if env.get("MTB_ONESHOT") == "1":
+                    self.assertIn("MTBOT_LISTEN_MINUTES", p.stdout)
     def test_every_variable_in_env_example_is_a_real_option(self):
         names = set()
         for line in read(os.path.join(INSTALL, "env.example")).splitlines():
@@ -337,7 +368,7 @@ class InstalledFilesTest(unittest.TestCase):
         self.assertTrue(svc["image"].startswith("ghcr.io/"))
         self.assertNotIn("build", svc)
         self.assertEqual((svc["env_file"], svc["restart"], svc["volumes"]), (".env", "no", ["./data:/data"]))
-        self.assertEqual(svc["command"], ["--now", "--fixed-schedule"])
+        self.assertEqual(svc["command"], ["--now"])  # [AC-session-limits-7]
 
     def test_the_meshmonitor_example(self):
         import yaml

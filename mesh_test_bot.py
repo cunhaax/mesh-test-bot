@@ -20,8 +20,7 @@ Runs a short, automatic on-air test on a Meshtastic channel:
 
 1. Sends `message_count` messages on the configured channel at random moments of the
    emission window (never two closer than `min_gap_seconds`), so that everybody
-   running this does not transmit at once. `random_schedule = false` gives fixed
-   times instead. A message looks like
+   running this does not transmit at once. A message looks like
 
        MTBOT | ABCD | Lisboa | 2/3
 
@@ -63,6 +62,7 @@ import configparser
 import contextlib
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -81,15 +81,15 @@ ENV_PREFIX = "MTBOT_"  # environment variables: MTBOT_HOST, MTBOT_PLACE...
 SCHEMA = 2  # version of the JSON report
 MAX_TEXT_BYTES = 200  # a Meshtastic text message holds about this much
 MIN_EPOCH = 1_000_000_000  # a packet time below this (2001) is not a real clock reading
-MAX_RANDOM_COUNT = 5  # with random_schedule, more than this needs --fixed-schedule
-MIN_RANDOM_LISTEN_MINUTES = 120.0  # with random_schedule, less than this needs --fixed-schedule
-MIN_RANDOM_REPORT_WINDOW_MINUTES = 60.0  # with random_schedule, less than this needs --fixed-schedule
-# All three exist because LoRa has no real collision avoidance: with many participants
-# spread across random_schedule's shared window, a high message_count, a short emission
-# window or a short report window (which is also how long the bot keeps listening for
-# stragglers) risks flooding the channel or undercounting a large, multi-hop mesh.
-# --fixed-schedule is for a single operator's own controlled testing (see the README)
-# and is exempt from all three.
+MAX_MESSAGE_COUNT = 10  # more than this needs --unsafe-limits
+MIN_LISTEN_MINUTES = 30.0  # less than this needs --unsafe-limits
+MIN_REPORT_WINDOW_MINUTES = 10.0  # never relaxed: the report waits for stragglers to propagate
+# These exist because LoRa has no real collision avoidance: many participants sending a
+# high message_count inside a short emission window risks flooding the channel, and a short
+# report window undercounts a large, multi-hop mesh. --unsafe-limits is for a private
+# channel and a single operator's own load test; see the README.
+REMOVED_FLAGS = ("--fixed-schedule", "--interval")
+LEGACY_SETTINGS = ("random_schedule", "interval_minutes")  # no longer exist; ignored with a warning
 
 # Not configurable on purpose: knobs that protect the bot from itself, not settings a
 # deployment should need to tune.
@@ -211,6 +211,61 @@ def parse_aliases(text):
     return aliases
 
 
+def _reject_removed_flags(argv):
+    """Exit with the fix when a flag from before random spacing is passed: argparse's own
+    error would not say what to do instead."""
+    for arg in (sys.argv[1:] if argv is None else argv):
+        flag = arg.split("=", 1)[0]
+        if flag in REMOVED_FLAGS:
+            sys.exit("%s was removed: messages always go out at random moments now. For an on-demand "
+                     "run, use command: [\"--now\"] in docker-compose.yml, or `docker compose run --rm bot "
+                     "--now`." % flag)
+
+
+def _warn_legacy_settings(cp, path):
+    """Settings and variables that no longer exist are ignored, but say so: someone who relied on
+    fixed spacing would otherwise silently get random spacing."""
+    for key in LEGACY_SETTINGS:
+        if cp.has_option("bot", key) and cp.get("bot", key).strip():
+            log.warning("`%s` in %s no longer exists: messages always go out at random moments; it is ignored.",
+                        key, path)
+        if os.environ.get(ENV_PREFIX + key.upper(), "").strip():
+            log.warning("%s%s no longer exists: messages always go out at random moments; it is ignored.",
+                        ENV_PREFIX, key.upper())
+    if cp.has_option("bot", "unsafe_limits") or os.environ.get(ENV_PREFIX + "UNSAFE_LIMITS", "").strip():
+        log.warning("--unsafe-limits is a command-line flag only: a setting for it is ignored.")
+
+
+def _check_limits(cfg, unsafe):
+    """Refuse sessions outside the limits and return the gap between our own messages."""
+    listen, report, count = cfg["listen_minutes"], cfg["report_window_minutes"], cfg["message_count"]
+    for name, value in (("listen_minutes", listen), ("report_window_minutes", report),
+                        ("message_count", count)):
+        if not math.isfinite(value):
+            sys.exit("`%s` must be a finite number: %r" % (name, value))
+    if report < MIN_REPORT_WINDOW_MINUTES:
+        sys.exit("`report_window_minutes` below %g: a large multi-hop mesh needs this long to finish "
+                 "propagating before the report is written, or stragglers are undercounted: %r"
+                 % (MIN_REPORT_WINDOW_MINUTES, report))
+    if not unsafe:
+        if count > MAX_MESSAGE_COUNT:
+            sys.exit("`message_count` above %d needs --unsafe-limits: many participants each sending that "
+                     "many messages risks flooding the channel: %r" % (MAX_MESSAGE_COUNT, count))
+        if listen < MIN_LISTEN_MINUTES:
+            sys.exit("`listen_minutes` below %g needs --unsafe-limits: many participants in a short window "
+                     "risks flooding the channel: %r" % (MIN_LISTEN_MINUTES, listen))
+        return MIN_GAP_SECONDS
+    if listen <= 0:
+        sys.exit("`listen_minutes` must be above 0 with --unsafe-limits: %r" % listen)
+    gap = min(MIN_GAP_SECONDS, listen * 60 / (2 * max(count, 1)))
+    log.warning("--unsafe-limits, for a private-channel load test only. Relaxed: session length (normally "
+                "at least %g min; now %g min), message cap (normally %d; now %d), minimum gap between our own "
+                "messages (normally %g s; now %g s). Still enforced: report window of at least %g min.",
+                MIN_LISTEN_MINUTES, listen, MAX_MESSAGE_COUNT, count, MIN_GAP_SECONDS, gap,
+                MIN_REPORT_WINDOW_MINUTES)
+    return gap
+
+
 def load_config(argv):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
@@ -229,14 +284,14 @@ def load_config(argv):
                     help="prefix repeated at the start of every line in the text report")
     ap.add_argument("--mode", help="LoRa mode label to use instead of reading it from the radio")
     ap.add_argument("--count", dest="message_count", help="number of messages to send")
-    ap.add_argument("--interval", dest="interval_minutes", help="minutes between messages")
     ap.add_argument("--start-time", dest="start_time", help="HH:MM in --timezone")
     ap.add_argument("--timezone", help="IANA zone start-time refers to, e.g. Europe/Lisbon")
     ap.add_argument("--weekday", help="day of the session (--schedule), or 'daily'")
     ap.add_argument("--report-window-minutes", dest="report_window_minutes",
                     help="report at a random moment this many minutes after the emission window")
-    ap.add_argument("--fixed-schedule", action="store_true",
-                    help="no randomness: messages every --interval minutes from start-time, report right at the end")
+    ap.add_argument("--unsafe-limits", dest="unsafe_limits", action="store_true",
+                    help="private-channel load tests only: lifts the minimum session length, the "
+                         "message cap and the 2-minute gap (the report-window floor stays)")
     ap.add_argument("--listen-minutes", dest="listen_minutes",
                     help="emission and listening window length, from start-time")
     ap.add_argument("--report-file", dest="report_file")
@@ -246,12 +301,16 @@ def load_config(argv):
                     help="start immediately instead of waiting for start-time")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the schedule, do not connect to the radio")
+    _reject_removed_flags(argv)
     args = ap.parse_args(argv)
 
     cp = configparser.ConfigParser(interpolation=None)
     cp["bot"] = DEFAULTS
     cp.read(args.config)
+    _warn_legacy_settings(cp, args.config)
     cfg = dict(cp["bot"])
+    for key in LEGACY_SETTINGS:
+        cfg.pop(key, None)
     for key in DEFAULTS:
         env = os.environ.get(ENV_PREFIX + key.upper(), "").strip()  # empty = unset, so that a
         if env:  # compose file can pass ${VAR} through without overriding the file by accident
@@ -299,28 +358,10 @@ def load_config(argv):
         sys.exit("The message does not fit in %d bytes (`place` or `keyword` too long): %r"
                  % (MAX_TEXT_BYTES, worst))
     cfg["message_count"] = int(cfg["message_count"])
-    cfg["interval_minutes"] = float(cfg["interval_minutes"])
     cfg["listen_minutes"] = float(cfg["listen_minutes"])
-    if args.fixed_schedule:
-        cfg["random_schedule"], cfg["report_window_minutes"] = "false", "0"
-    cfg["random_schedule"] = cfg["random_schedule"].strip().lower() in ("1", "true", "yes", "sim")
     cfg["report_window_minutes"] = float(cfg["report_window_minutes"])
-    if cfg["random_schedule"]:
-        if cfg["message_count"] > MAX_RANDOM_COUNT:
-            sys.exit("`message_count` above %d needs --fixed-schedule: with random_schedule, many "
-                     "participants each sending that many messages risks flooding the channel: %r"
-                     % (MAX_RANDOM_COUNT, cfg["message_count"]))
-        if cfg["listen_minutes"] < MIN_RANDOM_LISTEN_MINUTES:
-            sys.exit("`listen_minutes` below %g needs --fixed-schedule: with random_schedule, many "
-                     "participants in a short window risks flooding the channel: %r"
-                     % (MIN_RANDOM_LISTEN_MINUTES, cfg["listen_minutes"]))
-        if cfg["report_window_minutes"] < MIN_RANDOM_REPORT_WINDOW_MINUTES:
-            sys.exit("`report_window_minutes` below %g needs --fixed-schedule: with random_schedule, a "
-                     "large multi-hop mesh needs more time to finish propagating before the report is "
-                     "written, or stragglers are undercounted: %r"
-                     % (MIN_RANDOM_REPORT_WINDOW_MINUTES, cfg["report_window_minutes"]))
     # Not configurable: see the comment where these are defined.
-    cfg["min_gap_seconds"] = MIN_GAP_SECONDS
+    cfg["min_gap_seconds"] = _check_limits(cfg, args.unsafe_limits)
     cfg["session_tolerance_seconds"] = SESSION_TOLERANCE_SECONDS
     cfg["wake_before_minutes"] = WAKE_BEFORE_MINUTES
     cfg["startup_check_seconds"] = STARTUP_CHECK_SECONDS
@@ -941,16 +982,11 @@ def plan_send_times(cfg, start, end, rng=random):
     """When to send our messages. The window is cut in `message_count` equal segments
     and each message falls at a random moment of its own segment, at least
     `min_gap_seconds` before the segment ends, so two consecutive messages are never
-    closer than that. Without `random_schedule`: every `interval_minutes` from `start`
-    (but never closer than `min_gap_seconds`)."""
+    closer than that."""
     n = cfg["message_count"]
     gap = timedelta(seconds=cfg["min_gap_seconds"])
     if n <= 0:
         return []
-    if not cfg["random_schedule"]:
-        step = max(cfg["interval_minutes"] * 60, cfg["min_gap_seconds"])
-        times = (start + timedelta(seconds=step * i) for i in range(n))
-        return [t for t in times if t < end]
     if n > 1 and (end - start) / n < gap:
         fit = max(1, int((end - start) / gap))
         log.warning("The window is not long enough for %d messages %ds apart: sending %d", n,
