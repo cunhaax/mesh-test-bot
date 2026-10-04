@@ -98,16 +98,17 @@ counterproductive. So, by default:
 
 - **Messages:** the emission window is split into `message_count` equal parts and each message
   falls at a **random** moment of its own part. They end up spread out, and **never
-  two in a row closer than 2 minutes** (fixed, not configurable).
+  two in a row closer than 2 minutes** (unless `--unsafe-limits` is used, see
+  [Session limits](#session-limits)).
 - **Report:** comes out at a random moment between the end of the emission window and
   `report_window_minutes` later, never closer than 2 minutes to the last message. The
   bot keeps listening until then, which also catches delayed messages.
 - **Listening starts right at the beginning of the window**, even if the first message
   only goes out later.
 
-`random_schedule = false` (or `--fixed-schedule`) reverts to a deterministic mode: one
-message every `interval_minutes` from the start (never closer than 2 minutes), and the
-report right at the end. That's what suits testing.
+There's no fixed-times mode: sessions are always random, which is what keeps many
+participants from transmitting at once. For a private-channel load test, see
+[Session limits](#session-limits) and `--unsafe-limits`.
 
 ## How messages are interpreted
 
@@ -175,8 +176,8 @@ curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/instal
 Asks a few questions — how the bot should reach the radio (directly, through an
 existing MeshMonitor, or by setting up a new MeshMonitor right here; see [With
 MeshMonitor](#with-meshmonitor-optional) below), the test channel's index and name,
-your city, the message/report prefixes, and whether to run once now or on a recurring
-weekly schedule — press Enter to accept the default shown in brackets for any of them.
+your city, the message/report prefixes, and whether to run on a recurring weekly
+schedule or on demand — press Enter to accept the default shown in brackets for any of them.
 Creates a `mesh-test-bot/` folder with the configuration, and prints the exact
 `docker compose` commands that start it (the installer never starts anything itself:
 you run it, and know what it does). If
@@ -241,7 +242,7 @@ then disconnects until the session).
 Run a session right away, without waiting (e.g. to test):
 
 ```sh
-docker compose run --rm bot --now --fixed-schedule
+docker compose run --rm bot --now
 ```
 
 ### With environment variables only (no `.ini`)
@@ -263,6 +264,22 @@ services:
 ```
 
 Numeric values go in quotes, so YAML keeps them as text.
+
+## Upgrading from an older version
+
+Before the session limits, scheduled installs could use shorter sessions, a `random_schedule`
+setting and `--fixed-schedule`. Now:
+
+- A session with `listen_minutes` below 30, `report_window_minutes` below 10 or
+  `message_count` above 10 refuses to start. Under Docker, that shows up as a container that
+  keeps restarting: `docker compose logs` says which limit it is. Raise the values in
+  `data/bot.ini` (or `.env`), or, on a private channel only, set the compose `command:` to
+  `["--schedule", "--unsafe-limits"]` (keep `--schedule`: a bare flag would replace it).
+- `random_schedule` and `interval_minutes` no longer exist; the bot warns about them and
+  ignores them. Messages always go out at random moments.
+- On-demand runs in `docker-compose.yml` (`command: ["--now", "--fixed-schedule"]`) and
+  `docker compose run --rm bot --now --fixed-schedule` must drop `--fixed-schedule`, and
+  `--interval` is gone too. The bot refuses both and says so.
 
 ## Installing without Docker
 
@@ -327,36 +344,44 @@ two with no default. Each option can come from four places, in this order of pri
 - **Report:** `report_prefix`, the prefix repeated on every line of `report.txt`
   (unrelated to `keyword` above).
 - **Testing without disturbing the network:** point `channel`/`channel_name` at a
-  private channel and use `--now --fixed-schedule`. `--dry-run` shows the schedule
-  without connecting to the radio.
-- **Testing with more than just yourself:** see [Random-schedule
-  limits](#random-schedule-limits) below.
+  private channel and use `--now --unsafe-limits` for a short run. `--dry-run` shows the
+  schedule without connecting to the radio.
+- **Testing with more than just yourself:** see [Session limits](#session-limits) below.
 
-## Random-schedule limits
+## Session limits
 
-LoRa has no real collision avoidance, so a test with many stations crammed into a
-short window causes exactly the congestion it's meant to measure: 100 stations each
-sending a handful of messages inside a half-hour window, on the same channel, can
-easily flood it once relays are counted. With `random_schedule` (the default), the bot
-refuses to start if `message_count` is above 5, `listen_minutes` is under 120 (2h), or
-`report_window_minutes` is under 60 (1h) — all three `sys.exit` at startup, like an
-invalid `channel` or `place` would. (`report_window_minutes` is also how long the bot
-keeps listening after the emission window: too short, and a large multi-hop mesh
-doesn't get to finish propagating before the report is written.)
+LoRa has no real collision avoidance, so a test with many stations crammed into a short
+window causes exactly the congestion it's meant to measure. Every session, scheduled or
+started by hand, is therefore held to these limits:
 
-This isn't based on how many stations are actually testing, on purpose: that number
-can't be known reliably (someone in a quiet spot and someone in the middle of a dense
-city could both be testing alongside 100 others, and neither could tell that from their
-own radio), and a check that depends on every participant correctly entering it would
-only be as good as the least careful one. Flat caps and floors need nothing to be
+- `message_count` at most **10**;
+- `listen_minutes` (the emission and listening window) at least **30**;
+- `report_window_minutes` at least **10**.
+
+A session outside them refuses to start, like an invalid `channel` or `place` would. The
+report window is also how long the bot keeps listening after the emission window, so a
+large multi-hop mesh has time to finish propagating before the report is written.
+
+These limits don't depend on how many stations are actually testing, on purpose: that
+number can't be known reliably from one radio. Flat caps and floors need nothing
 coordinated beyond what already has to be agreed for people to hear each other at all
-(`channel`, `weekday`, `start_time`) — they just keep any single random-schedule
-session, run by anyone, out of the range where it risks flooding the channel regardless
-of how many others join in.
+(`channel`, `weekday`, `start_time`).
 
-`random_schedule = false` (`--fixed-schedule`) is exempt from all three: it's meant for a
-single operator's own controlled testing (see [Tests](#tests) below), not a shared
-session with an unknown number of participants.
+### `--unsafe-limits`: private-channel load tests only
+
+For a stress test on a channel only you use (for example several of your own radios),
+add `--unsafe-limits` to the command line. It lifts the minimum session length, the
+message cap and the 2-minute gap between your own messages. The report-window minimum
+stays. The 2-minute gap is kept whenever each message has at least 2 minutes of session
+to itself; in shorter sessions the gap becomes half of that share (`session ÷ (2 × count)`)
+so that the messages still spread out. The bot prints a warning at startup that lists
+exactly what was relaxed. The report is still written at a random moment after the session, but
+under this flag the minimum wait after the last message is the shortened gap, not 2 minutes.
+
+It is a command-line flag only. It can't be set in `bot.ini`, in an environment variable
+or by the installer, so it can't be switched on by accident in a shared `.env`. Never use
+it on a channel other people use. For a scheduled load test, put it in the compose
+`command:` (for example `["--schedule", "--unsafe-limits"]`), on the same private channel.
 
 ## How it works, and its limits
 
@@ -384,7 +409,7 @@ session with an unknown number of participants.
 - **What can still be lost:** only whatever the radio transmits while the connection
   is down, usually around 1 second. If there are outages, the report says how many
   there were and how much time they added up to.
-- **Two of our messages are never closer than 2 minutes** (fixed, not configurable),
+- **Two of our messages are never closer than 2 minutes** (unless `--unsafe-limits` is used),
   even across a connection outage.
 - The bot depends on the packets' fields and on the library's reconnection behaviour,
   so `requirements.txt` pins its version. Only bump it after testing.
@@ -420,15 +445,14 @@ Rules for all of them:
 - **Stop the container first** (`docker compose down`): the radio only accepts one TCP
   client at a time.
 - **Flags only apply to that run**; `data/bot.ini` is not changed.
-- **Add `--fixed-schedule`** whenever you use `--now`, otherwise the first message and
-  the report come out at random moments (the report can take up to
-  `report_window_minutes`).
+- **Recipes 1–3 use `--unsafe-limits`** because their sessions are shorter than the normal
+  limits allow. Use it only on a private channel.
 
 **1. Connection only** (listens for 2 minutes, **sends nothing**: notice `Sending
 at:` comes out empty):
 
 ```sh
-docker compose run --rm bot --now --fixed-schedule --listen-minutes 2 --count 0
+docker compose run --rm bot --now --unsafe-limits --report-window-minutes 10 --listen-minutes 2 --count 0
 ```
 
 Should print `Connected to radio … (node …, N known nodes, mode …)` and, at the end,
@@ -439,7 +463,7 @@ anything.
 test channel):
 
 ```sh
-docker compose run --rm bot --now --fixed-schedule --listen-minutes 5 --count 0 \
+docker compose run --rm bot --now --unsafe-limits --report-window-minutes 10 --listen-minutes 5 --count 0 \
   --channel <index> --channel-name <channel name>
 ```
 
@@ -459,7 +483,7 @@ not MTBOT at the start
 minutes):
 
 ```sh
-docker compose run --rm bot --now --fixed-schedule --listen-minutes 10 --count 1 \
+docker compose run --rm bot --now --unsafe-limits --report-window-minutes 10 --listen-minutes 10 --count 1 \
   --channel <index> --channel-name <channel name>
 ```
 
@@ -471,15 +495,13 @@ channel = <index>
 channel_name = <channel name>
 weekday = <today, in English: monday, tuesday…>
 start_time = <~5 minutes from now, HH:MM>
-listen_minutes = 12
+listen_minutes = 30
 message_count = 3
-random_schedule = false
-report_window_minutes = 4
+report_window_minutes = 10
 ```
 
-`random_schedule = false` here only so this demo stays short: with it on, the emission
-window has to be at least 2 hours (see [Random-schedule
-limits](#random-schedule-limits)).
+Those are the smallest values the normal limits allow (see [Session limits](#session-limits)):
+the session takes 30 minutes, and the report comes out up to 10 minutes after it.
 
 ```sh
 docker compose up -d

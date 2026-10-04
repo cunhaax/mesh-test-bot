@@ -43,8 +43,8 @@
     <div class="card">
       <h3>📤 Envia, com agenda</h3>
       <p>Umas mensagens curtas no teu canal de testes, espalhadas em momentos aleatórios
-      para que uma comunidade inteira não emita ao mesmo tempo — ou num intervalo fixo,
-      à tua escolha.</p>
+      para que uma comunidade inteira não emita ao mesmo tempo. Cada sessão tem limites (no máximo 10 mensagens, pelo menos 30 minutos de escuta, pelo menos 10 minutos para o relatório); um teste
+      de carga num canal privado pode levantar alguns com <code>--unsafe-limits</code>, ver o README.</p>
     </div>
     <div class="card">
       <h3>👂 Escuta o tempo todo</h3>
@@ -142,8 +142,8 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
     <p class="calc-note">Modelo aproximado: a fórmula standard de time-on-air do LoRa
     (Semtech AN1200.13) multiplicada por uma estimativa de quantas vezes cada mensagem é
     retransmitida no ar. Não é garantia, e não é imposto pelo bot em si —
-    <code>message_count</code> tem um máximo de 5 e <code>listen_minutes</code> tem um
-    mínimo de 120 minutos, independentemente desta calculadora (ver "Random-schedule
+    <code>message_count</code> tem um máximo de 10 e <code>listen_minutes</code> tem um
+    mínimo de 30 minutos, independentemente desta calculadora (ver "Session
     limits" no README).</p>
   </div>
 

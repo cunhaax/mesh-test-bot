@@ -65,7 +65,9 @@ fetch() {  # fetch <file> <destination>
     fi
 }
 
-[ ! -e "$DIR/.env" ] || die "$DIR/.env already exists: edit it by hand, or delete it to start over"
+for f in .env docker-compose.yml env.example; do
+    [ ! -e "$DIR/$f" ] || die "$DIR/$f already exists: edit it by hand, or delete the generated files to start over (your data/ folder is kept)"
+done
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
 ask MTB_CONNECTION "Connect directly to the radio, through an existing MeshMonitor, or set up a new MeshMonitor here? [direct/existing/setup]" direct
@@ -95,7 +97,15 @@ ask MTBOT_PLACE "Where you are (city)"
 ask MTBOT_KEYWORD "Message prefix (tags this bot's messages; may be several words)" MTBOT
 ask MTBOT_REPORT_PREFIX "Report-line prefix (starts every line of the readable report)" ACK
 ask MTBOT_TIMEZONE "IANA timezone for report timestamps (e.g. Europe/Lisbon)" Europe/Lisbon
-ask MTB_ONESHOT "Run on demand (one session when you start it) instead of on a recurring weekly schedule?" n
+if [ -z "${MTB_ONESHOT:-}" ]; then
+    ask MTB_RUN "How should it run: scheduled (every week, keeps running) or on-demand (you start each session)? [scheduled/on-demand]" scheduled
+    MTB_RUN=$(printf '%s' "$MTB_RUN" | tr 'A-Z' 'a-z')
+    case $MTB_RUN in
+        scheduled|s) MTB_ONESHOT=0 ;;
+        on-demand|ondemand|o) MTB_ONESHOT=1 ;;
+        *) die "run mode must be scheduled or on-demand: $MTB_RUN" ;;
+    esac
+fi
 case $MTB_ONESHOT in
     1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
     0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
@@ -186,16 +196,18 @@ if [ "$MTB_CONNECTION" = setup ]; then
     say "    https://github.com/$REPO/blob/master/docs/meshmonitor.md"
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  Then, each time you want a session:"
-        say "  docker compose run --rm bot --now --fixed-schedule"
-        say "    runs one session now, messages every MTBOT_INTERVAL_MINUTES, report at the end of"
-        say "    MTBOT_LISTEN_MINUTES (both in $DIR/.env); the bot container stops, MeshMonitor keeps running."
+        say "  docker compose run --rm bot --now"
+        say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
+        say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env; defaults 120 and 60)."
+        say "    The bot container stops, MeshMonitor keeps running."
     else
         say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
     fi
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "  docker compose up -d"
-    say "    runs one session now, messages every MTBOT_INTERVAL_MINUTES, report at the end of"
-    say "    MTBOT_LISTEN_MINUTES (both in $DIR/.env); the container stops when it is done."
+    say "    runs one session now: messages at random moments within MTBOT_LISTEN_MINUTES, report up to"
+    say "    MTBOT_REPORT_WINDOW_MINUTES after that (set in $DIR/.env; defaults 120 and 60)."
+    say "    The container stops when it is done."
     say "    Run the same command again for another session."
 else
     say "  docker compose up -d"

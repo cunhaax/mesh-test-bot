@@ -5,6 +5,7 @@ sends. Nothing here touches a radio. Run: python3 -m unittest discover tests"""
 import json
 import os
 import random
+import subprocess
 import sys
 import tempfile
 import threading
@@ -177,15 +178,6 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.load("channel = 1\nplace = Lisboa\nreport_prefix =\n")
 
-    def test_random_schedule_rejects_too_many_messages_or_too_short_a_window(self):
-        for ini in ("message_count = 6\n", "listen_minutes = 119\n", "report_window_minutes = 59\n"):
-            with self.subTest(ini=ini), self.assertRaises(SystemExit):
-                self.load("channel = 1\nplace = Lisboa\n" + ini)
-        # exactly at the limit is fine
-        self.load("channel = 1\nplace = Lisboa\nmessage_count = 5\n")
-        self.load("channel = 1\nplace = Lisboa\nlisten_minutes = 120\n")
-        self.load("channel = 1\nplace = Lisboa\nreport_window_minutes = 60\n")
-
     def test_min_gap_session_tolerance_wake_before_and_startup_check_are_not_configurable(self):
         # a bot.ini setting them is simply ignored: they are internal, fixed values
         cfg = self.load("channel = 1\nplace = Lisboa\nmin_gap_seconds = 1\n"
@@ -201,10 +193,6 @@ class ConfigTest(unittest.TestCase):
                          (bot.STARTUP_CHECK_SECONDS, bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
                           bot.STARTUP_CHECK_BACKOFF_SECONDS, bot.STARTUP_CHECK_BACKOFF_CAP_SECONDS,
                           bot.STARTUP_CHECK_JOIN_SECONDS))
-
-    def test_fixed_schedule_is_exempt_from_the_random_schedule_limits(self):
-        cfg = self.load("channel = 1\nplace = Lisboa\nmessage_count = 50\nlisten_minutes = 2\n", "--fixed-schedule")
-        self.assertEqual((cfg["message_count"], cfg["listen_minutes"]), (50, 2.0))
 
     def test_message_is_built_and_parsed_back(self):
         cfg = self.load("channel = 1\nplace = Vila Nova\n")
@@ -226,10 +214,9 @@ class EnvironmentTest(unittest.TestCase):
 
     def test_the_environment_alone_is_enough_no_file_needed(self):
         cfg = self.load(None, {"MTBOT_CHANNEL": "1", "MTBOT_PLACE": "Porto", "MTBOT_HOST": "10.0.0.2",
-                               "MTBOT_PORT": "4404", "MTBOT_MESSAGE_COUNT": "5", "MTBOT_RANDOM_SCHEDULE": "false"})
+                               "MTBOT_PORT": "4404", "MTBOT_MESSAGE_COUNT": "5"})
         self.assertEqual((cfg["channel"], cfg["place"], cfg["host"], cfg["port"], cfg["message_count"]),
                          (1, "Porto", "10.0.0.2", 4404, 5))
-        self.assertFalse(cfg["random_schedule"])
 
     def test_precedence_flags_then_environment_then_file_then_defaults(self):
         ini = "channel = 1\nplace = Ficheiro\nhost = 10.0.0.1\nmessage_count = 4\n"
@@ -771,8 +758,7 @@ class ScheduleTest(unittest.TestCase):
     END = datetime(2026, 9, 19, 21, 30)
 
     def cfg(self, **kw):
-        cfg = {"message_count": 3, "random_schedule": True, "min_gap_seconds": 60.0,
-               "interval_minutes": 5.0, "report_window_minutes": 30.0}
+        cfg = {"message_count": 3, "min_gap_seconds": 60.0, "report_window_minutes": 30.0}
         cfg.update(kw)
         return cfg
 
@@ -805,16 +791,6 @@ class ScheduleTest(unittest.TestCase):
         end = self.START + timedelta(seconds=24)
         t = bot.plan_send_times(self.cfg(message_count=1), self.START, end, random.Random(1))
         self.assertEqual(t, [self.START])
-
-    def test_fixed_schedule_is_the_old_behaviour(self):
-        cfg = self.cfg(random_schedule=False, message_count=3)
-        t = bot.plan_send_times(cfg, self.START, self.END)
-        self.assertEqual(t, [self.START + timedelta(minutes=m) for m in (0, 5, 10)])
-
-    def test_fixed_schedule_never_goes_below_the_minimum_gap(self):
-        cfg = self.cfg(random_schedule=False, message_count=3, interval_minutes=0.1)  # 6 s, but the gap is 60 s
-        t = bot.plan_send_times(cfg, self.START, self.END)
-        self.assertEqual(t, [self.START + timedelta(seconds=s) for s in (0, 60, 120)])
 
     def test_report_time_is_random_within_its_window(self):
         cfg = self.cfg()
@@ -1327,8 +1303,7 @@ class SessionTest(unittest.TestCase):
             from pubsub import pub
         except ImportError:
             self.skipTest("pypubsub not installed")
-        cfg = make_cfg(message_count=1, random_schedule=False, interval_minutes=0.0, min_gap_seconds=0.1,
-                       report_window_minutes=0.0, listen_minutes=0.05)
+        cfg = make_cfg(message_count=1, min_gap_seconds=0.1, report_window_minutes=0.0, listen_minutes=0.05)
         iface = FakeIface()
         start = datetime.now(cfg["tz"])
         end = start + timedelta(seconds=2.5)
@@ -1339,7 +1314,8 @@ class SessionTest(unittest.TestCase):
                                                                rssi=-98, hop_start=3, hop_limit=3), interface=iface)
         threading.Thread(target=deliver, daemon=True).start()
 
-        with mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"):
+        with mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"), \
+                mock.patch.object(bot.random, "random", lambda: 0.5):  # the one message at the middle of its window
             bot.run_window(cfg, start, end, factory=lambda host, port: iface)
 
         self.assertEqual(iface.sent, [("MTBOT | 270f | Lisboa | 1/1", 2, False)])  # my_num 9999 = 0x270f
@@ -1511,10 +1487,166 @@ class MainStartupCheckTest(unittest.TestCase):
     def test_one_shot_runs_never_call_check_radio(self):
         path = self.ini()
         with mock.patch.object(bot, "check_radio") as check, mock.patch.object(bot, "run_window") as rw:
-            rc = bot.main(["--config", path, "--now", "--fixed-schedule", "--listen-minutes", "0", "--count", "0"])
+            rc = bot.main(["--config", path, "--now", "--listen-minutes", "30", "--count", "0"])
         self.assertEqual(rc, 0)
         check.assert_not_called()
         rw.assert_called_once()
+
+
+class SessionLimitsTest(unittest.TestCase):
+    """Always-random spacing, the normal limits, and --unsafe-limits. [AC/EDGE tags name the plan item]"""
+
+    def load(self, ini, *flags, env=None):
+        path = os.path.join(tempfile.mkdtemp(), "bot.ini")
+        open(path, "w", encoding="utf-8").write("[bot]\nchannel = 1\nplace = Lisboa\n" + ini)
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
+        with mock.patch.dict(os.environ, dict(clean, **(env or {})), clear=True):
+            return bot.load_config(["--config", path] + list(flags))[0]
+
+    def test_defaults_have_no_fixed_spacing_settings(self):  # [AC-session-limits-1]
+        self.assertNotIn("random_schedule", bot.DEFAULTS)
+        self.assertNotIn("interval_minutes", bot.DEFAULTS)
+
+    def test_help_lists_the_unsafe_flag_and_not_the_removed_ones(self):  # [AC-session-limits-1]
+        out = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..", "mesh_test_bot.py"),
+                              "--help"], capture_output=True, text=True, timeout=30).stdout
+        self.assertIn("--unsafe-limits", out)
+        self.assertNotIn("--fixed-schedule", out)
+        self.assertNotIn("--interval", out)
+
+    def test_normal_limits_refuse_and_accept_at_the_boundary(self):  # [AC-session-limits-2] [EDGE-session-limits-2]
+        for ini in ("message_count = 11\n", "listen_minutes = 29.9\n", "report_window_minutes = 9.9\n"):
+            with self.subTest(ini=ini), self.assertRaises(SystemExit):
+                self.load(ini)
+        self.load("message_count = 10\nlisten_minutes = 30\nreport_window_minutes = 10\n")
+
+    def test_the_limits_apply_to_now_and_schedule_alike(self):  # [AC-session-limits-2]
+        path = os.path.join(tempfile.mkdtemp(), "bot.ini")
+        open(path, "w", encoding="utf-8").write("[bot]\nchannel = 1\nplace = X\n")
+        with self.assertRaises(SystemExit):
+            bot.main(["--config", path, "--now", "--listen-minutes", "20", "--dry-run"])
+        with self.assertRaises(SystemExit):
+            bot.main(["--config", path, "--schedule", "--count", "11", "--dry-run"])
+
+    def test_a_negative_message_count_is_refused_in_both_modes(self):  # [AC-session-limits-2] (review)
+        for flags in ((), ("--unsafe-limits",)):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit) as cm:
+                self.load("message_count = -1\n", *flags)
+            self.assertIn("cannot be negative", str(cm.exception))
+
+    def test_normal_mode_gap_is_two_minutes(self):  # [AC-session-limits-3]
+        self.assertEqual(self.load("")["min_gap_seconds"], 120.0)
+
+    def test_ten_messages_in_thirty_minutes_are_all_sent_two_minutes_apart(self):  # [AC-session-limits-3] [EDGE-session-limits-1]
+        start = datetime(2026, 9, 19, 21, 0)
+        end = start + timedelta(minutes=30)
+        cfg = {"message_count": 10, "min_gap_seconds": 120.0, "report_window_minutes": 10.0}
+        for seed in range(300):
+            with mock.patch.object(bot.log, "warning") as warn:
+                t = bot.plan_send_times(cfg, start, end, random.Random(seed))
+            self.assertEqual(len(t), 10)
+            self.assertTrue(all(start <= x < end for x in t))
+            self.assertTrue(all(b - a >= timedelta(seconds=120) for a, b in zip(t, t[1:])))
+            warn.assert_not_called()
+
+    def test_unsafe_limits_allows_short_dense_sessions_with_a_scaled_gap(self):  # [AC-session-limits-4]
+        cfg = self.load("listen_minutes = 5\nmessage_count = 20\n", "--unsafe-limits")
+        self.assertEqual(cfg["min_gap_seconds"], 7.5)
+
+    def test_unsafe_scaled_gap_spreads_every_message_across_the_short_window(self):  # [AC-session-limits-4]
+        start = datetime(2026, 9, 19, 21, 0)
+        end = start + timedelta(minutes=5)
+        cfg = {"message_count": 20, "min_gap_seconds": 7.5, "report_window_minutes": 10.0}
+        for seed in range(300):
+            t = bot.plan_send_times(cfg, start, end, random.Random(seed))
+            self.assertEqual(len(t), 20)
+            self.assertTrue(all(b - a >= timedelta(seconds=7.5) for a, b in zip(t, t[1:])))
+            self.assertGreaterEqual(t[-1], start + (end - start) * 19 / 20)  # the last one is in the final segment
+
+    def test_unsafe_limits_warns_listing_exactly_the_relaxed_limits(self):  # [AC-session-limits-5]
+        with self.assertLogs("bot", "WARNING") as logs:
+            self.load("listen_minutes = 5\nmessage_count = 20\n", "--unsafe-limits")
+        unsafe = [r for r in logs.output if "--unsafe-limits" in r]
+        self.assertEqual(len(unsafe), 1)
+        for fragment in ("session length", "now 5 min", "message cap", "now 20",
+                         "minimum gap", "now 7.5 s", "Still enforced: report window of at least 10 min"):
+            self.assertIn(fragment, unsafe[0])
+
+    def test_unsafe_limits_cannot_come_from_env_or_file(self):  # [AC-session-limits-6] [EDGE-session-limits-8]
+        with self.assertRaises(SystemExit) as cm:
+            self.load("listen_minutes = 5\n", env={"MTBOT_UNSAFE_LIMITS": "1"})
+        self.assertIn("--unsafe-limits", str(cm.exception))
+        with self.assertRaises(SystemExit):
+            self.load("listen_minutes = 5\nunsafe_limits = true\n")
+        with self.assertLogs("bot", "WARNING"):  # the flag is set in the environment: say so, and ignore it
+            cfg = self.load("", env={"MTBOT_UNSAFE_LIMITS": "1"})
+        self.assertEqual(cfg["min_gap_seconds"], 120.0)
+
+    def test_the_report_window_floor_stays_under_unsafe_limits(self):  # [EDGE-session-limits-3]
+        with self.assertRaises(SystemExit) as cm:
+            self.load("report_window_minutes = 5\n", "--unsafe-limits")
+        self.assertNotIn("--unsafe-limits", str(cm.exception))
+
+    def test_unsafe_limits_refuses_a_zero_or_negative_session(self):  # [EDGE-session-limits-4]
+        for flags in (("--unsafe-limits", "--listen-minutes", "0"), ("--unsafe-limits", "--listen-minutes=-1")):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit) as cm:
+                self.load("", *flags)
+            self.assertIn("must be above 0", str(cm.exception))
+
+    def test_listen_only_sessions_load_and_plan_nothing(self):  # [EDGE-session-limits-5]
+        cfg = self.load("listen_minutes = 30\nmessage_count = 0\n")
+        self.assertEqual(bot.plan_send_times(cfg, datetime(2026, 9, 19, 21, 0), datetime(2026, 9, 19, 21, 30)), [])
+
+    def test_unsafe_limits_keeps_the_two_minute_gap_when_the_segments_allow_it(self):  # [AC-session-limits-4]
+        self.assertEqual(self.load("listen_minutes = 30\nmessage_count = 10\n", "--unsafe-limits")["min_gap_seconds"], 120.0)
+
+    def test_unsafe_limits_on_a_long_session_keeps_the_two_minute_gap(self):  # [EDGE-session-limits-6]
+        with self.assertLogs("bot", "WARNING") as logs:
+            cfg = self.load("", "--unsafe-limits")
+        self.assertEqual(cfg["min_gap_seconds"], 120.0)
+        self.assertTrue(any("now 120 s" in r for r in logs.output))
+
+    def test_non_finite_limits_are_refused(self):  # [AC-session-limits-2] (review F6)
+        for ini in ("listen_minutes = nan\n", "report_window_minutes = inf\n", "listen_minutes = inf\n"):
+            with self.subTest(ini=ini), self.assertRaises(SystemExit):
+                self.load(ini)
+
+    def test_legacy_fixed_spacing_settings_warn_and_are_ignored(self):  # [EDGE-session-limits-9]
+        with self.assertLogs("bot", "WARNING") as logs:
+            cfg = self.load("random_schedule = false\ninterval_minutes = 5\n")
+        self.assertTrue(any("no longer exist" in r and "random_schedule" in r for r in logs.output))
+        self.assertNotIn("random_schedule", cfg)
+        with self.assertLogs("bot", "WARNING") as logs:
+            self.load("", env={"MTBOT_RANDOM_SCHEDULE": "false", "MTBOT_INTERVAL_MINUTES": "5"})
+        self.assertTrue(any("MTBOT_RANDOM_SCHEDULE" in r and "no longer exist" in r for r in logs.output))
+
+    def test_removed_flags_exit_with_the_fix(self):  # [EDGE-session-limits-10]
+        for flags in (["--fixed-schedule"], ["--interval", "5"], ["--interval=5"]):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit) as cm:
+                self.load("", *flags)
+            self.assertIn("was removed", str(cm.exception))
+            self.assertIn('["--now"]', str(cm.exception))
+
+    def test_removed_flags_are_caught_on_the_real_command_line_too(self):  # [EDGE-session-limits-10] review F5
+        path = os.path.join(tempfile.mkdtemp(), "bot.ini")
+        open(path, "w", encoding="utf-8").write("[bot]\nchannel = 1\nplace = X\n")
+        with mock.patch.object(sys, "argv", ["mesh_test_bot.py", "--config", path, "--now", "--fixed-schedule"]), \
+                mock.patch.object(bot, "run_window") as rw, self.assertRaises(SystemExit) as cm:
+            bot.main()
+        self.assertIn("was removed", str(cm.exception))
+        rw.assert_not_called()
+
+    def test_a_late_start_reduces_the_count_and_keeps_the_gap(self):  # [EDGE-session-limits-7]
+        start = datetime(2026, 9, 19, 21, 0)
+        end = start + timedelta(minutes=5)
+        cfg = {"message_count": 10, "min_gap_seconds": 120.0, "report_window_minutes": 10.0}
+        with self.assertLogs("bot", "WARNING"):
+            t = bot.plan_send_times(cfg, start, end, random.Random(1))
+        self.assertEqual(len(t), 2)
+        self.assertGreaterEqual(t[1] - t[0], timedelta(seconds=120))
+
+    def test_min_gap_in_the_file_is_still_ignored(self):  # [EDGE-session-limits-12]
+        self.assertEqual(self.load("min_gap_seconds = 1\n")["min_gap_seconds"], 120.0)
 
 
 if __name__ == "__main__":

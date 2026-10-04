@@ -63,7 +63,7 @@ class InstallerTest(unittest.TestCase):
     def test_answers_from_stdin_in_order(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         answers = ["direct", "10.0.0.7", "4403", "3", "MeuCanal", "Porto", "CustomKey", "CustomRep",
-                   "America/New_York", "y"]
+                   "America/New_York", "on-demand"]
         p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
@@ -177,7 +177,7 @@ class InstallerTest(unittest.TestCase):
         for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):
             self.assertNotIn(name, env)
         self.assertIn("docker compose up -d meshmonitor", p.stdout)
-        self.assertIn("docker compose run --rm bot --now --fixed-schedule", p.stdout)
+        self.assertIn("docker compose run --rm bot --now\n", p.stdout)
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "with-meshmonitor.yml")))
 
@@ -226,6 +226,17 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("docker compose up -d", p.stdout)
         self.assertIn("Nothing is running yet", p.stdout)
 
+    def test_an_existing_compose_file_alone_is_never_overwritten(self):  # review: generated files, not only .env
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        os.makedirs(out)
+        with open(os.path.join(out, "docker-compose.yml"), "w", encoding="utf-8") as f:
+            f.write("# my own edits\n")
+        p, _ = run_installer(MTB_DIR=out, MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("docker-compose.yml already exists", p.stderr)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")), "# my own edits\n")
+        self.assertFalse(os.path.exists(os.path.join(out, ".env")))
+
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         self.assertEqual(p.returncode, 0)
@@ -248,7 +259,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_an_empty_channel_name_is_read_as_not_set(self):
         # connection, host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
-        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "y"]
+        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "on-demand"]
         p, out = run_installer("\n".join(answers) + "\n")
         env = read_env_file(os.path.join(out, ".env"))
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
@@ -291,7 +302,7 @@ class PipedInstallerTest(unittest.TestCase):
     def test_curl_pipe_sh_asks_on_the_terminal(self):
         # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
         self.assertEqual(code, 0, screen)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.4", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX",
@@ -301,13 +312,76 @@ class PipedInstallerTest(unittest.TestCase):
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(
-            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "on-demand"])
         self.assertNotEqual(code, 0)
         self.assertIn("channel must be a number from 0 to 7: 9", screen)
         self.assertFalse(os.path.exists(out))
 
 
 class InstalledFilesTest(unittest.TestCase):
+    REMOVED = ("fixed-schedule", "random_schedule", "interval_minutes", "INTERVAL_MINUTES", "fixed interval",
+               "intervalo fixo", "Random-schedule limits")
+
+    def test_no_shipped_file_mentions_the_removed_fixed_spacing(self):  # [AC-session-limits-8]
+        files = [os.path.join(ROOT, "README.md"), os.path.join(ROOT, "defaults.ini"),
+                 os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html"),
+                 os.path.join(ROOT, "docs", "meshmonitor.md")]
+        files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
+        for path in files:
+            text = read(path)
+            if path.endswith("README.md"):  # the upgrade note names them on purpose
+                text = text[:text.index("## Upgrading from an older version")] + text[text.index("## Installing without Docker"):]
+            text = text.lower()
+            for word in self.REMOVED:
+                with self.subTest(file=os.path.basename(path), word=word):
+                    self.assertNotIn(word.lower(), text)
+
+    def test_the_installer_never_offers_or_prints_unsafe_limits(self):  # [AC-session-limits-6]
+        for name in os.listdir(INSTALL):
+            with self.subTest(file=name):
+                self.assertNotIn("unsafe", read(os.path.join(INSTALL, name)).lower())
+
+    def test_both_index_pages_state_the_limits_and_the_flag(self):  # [AC-session-limits-8]
+        for path in (os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")):
+            with self.subTest(file=path):
+                text = read(path)
+                self.assertIn("--unsafe-limits", text)
+                if path.endswith("pt/index.html"):
+                    self.assertIn("no máximo 10 mensagens", text)
+                    self.assertIn("pelo menos 30 minutos", text)
+                    self.assertIn("pelo menos 10 minutos", text)
+                else:
+                    self.assertIn("at most 10 messages", text)
+                    self.assertIn("at least 30 minutes", text)
+                    self.assertIn("at least 10 minutes", text)
+
+    def test_a_fresh_on_demand_install_is_not_refused_by_the_limits(self):  # [EDGE-session-limits-11]
+        import yaml
+        p, out = run_installer(MTB_ONESHOT="1", MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1",
+                               MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        command = yaml.safe_load(read(os.path.join(out, "docker-compose.yml")))["services"]["bot"]["command"]
+        env = read_env_file(os.path.join(out, ".env"))
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
+        with mock.patch.dict(os.environ, dict(clean, **env), clear=True):
+            cfg = bot.load_config(["--config", "/nonexistent.ini"] + command)[0]
+        self.assertEqual(cfg["min_gap_seconds"], 120.0)
+        self.assertEqual(cfg["message_count"], 3)
+
+    def test_printed_commands_name_only_real_options_and_no_removed_flags(self):  # [AC-session-limits-7]
+        for env in (dict(MTB_ONESHOT="1"), dict(MTB_ONESHOT="0", MTBOT_WEEKDAY="sunday", MTBOT_START_TIME="07:30"),
+                    dict(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTB_ONESHOT="1"),
+                    dict(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTB_ONESHOT="0",
+                         MTBOT_WEEKDAY="sunday", MTBOT_START_TIME="07:30")):
+            with self.subTest(**env):
+                p, _ = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
+                                     MTBOT_PLACE="Porto", **env)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertNotIn("fixed-schedule", p.stdout)
+                for name in re.findall(r"MTBOT_\w+", p.stdout):
+                    self.assertIn(name[len(bot.ENV_PREFIX):].lower(), bot.DEFAULTS, name)
+                if env.get("MTB_ONESHOT") == "1":
+                    self.assertIn("MTBOT_LISTEN_MINUTES", p.stdout)
     def test_every_variable_in_env_example_is_a_real_option(self):
         names = set()
         for line in read(os.path.join(INSTALL, "env.example")).splitlines():
@@ -337,7 +411,7 @@ class InstalledFilesTest(unittest.TestCase):
         self.assertTrue(svc["image"].startswith("ghcr.io/"))
         self.assertNotIn("build", svc)
         self.assertEqual((svc["env_file"], svc["restart"], svc["volumes"]), (".env", "no", ["./data:/data"]))
-        self.assertEqual(svc["command"], ["--now", "--fixed-schedule"])
+        self.assertEqual(svc["command"], ["--now"])  # [AC-session-limits-7]
 
     def test_the_meshmonitor_example(self):
         import yaml

@@ -42,7 +42,9 @@
     <div class="card">
       <h3>📤 Sends, on a schedule</h3>
       <p>A few short messages on your test channel, spread at random moments so a whole
-      community doesn't transmit at once — or on a fixed interval, your choice.</p>
+      community doesn't transmit at once. Every session is held to limits (at most 10 messages,
+      at least 30 minutes of listening, at least 10 minutes for the report); a private-channel load
+      test can lift some of them with <code>--unsafe-limits</code>, see the README.</p>
     </div>
     <div class="card">
       <h3>👂 Listens the whole time</h3>
@@ -136,9 +138,9 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
     <div class="calc-result" id="calcResult"></div>
     <p class="calc-note">Rough model: the standard LoRa time-on-air formula (Semtech
     AN1200.13) times an estimated number of on-air retransmissions. Not a guarantee, and
-    not enforced by the bot itself — <code>message_count</code> is capped at 5 and
-    <code>listen_minutes</code> has a 120-minute floor regardless of this calculator (see
-    the README's Random-schedule limits).</p>
+    not enforced by the bot itself — <code>message_count</code> is capped at 10 and
+    <code>listen_minutes</code> has a 30-minute floor regardless of this calculator (see
+    the README's Session limits).</p>
   </div>
 
   <h2>Links</h2>
