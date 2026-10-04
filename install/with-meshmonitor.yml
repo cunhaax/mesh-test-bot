@@ -2,25 +2,23 @@
 # (which only accepts one TCP client) and the bot connects to its Virtual Node.
 # Full guide: docs/meshmonitor.md
 #
-#   1. Change the 5 lines marked "<-- change".
-#   2. docker compose -f with-meshmonitor.yml up -d meshmonitor
-#   3. Open http://localhost:8080 (admin / changeme), change the password and enable the
+# Configuration lives in the .env file next to this one (see meshmonitor.env.example).
+#
+#   1. docker compose -f with-meshmonitor.yml up -d
+#   2. Open http://localhost:8080 (admin / changeme), change the password and enable the
 #      Virtual Node on the source (the guide says how).
-#   4. docker compose -f with-meshmonitor.yml up -d bot
 #
 # At startup the bot briefly connects to check the radio is reachable, retrying for a few
 # minutes and then exiting (so it restarts under "restart: unless-stopped") if it never
-# can -- which is what happens on every restart before step 3 is done. Doing step 3 first
-# just avoids that pointless restart cycle; "restart: unless-stopped" recovers either way,
-# within a few minutes, once the Virtual Node is enabled -- no manual restart required.
+# can -- which is what happens on every restart before step 2 is done. "restart:
+# unless-stopped" recovers on its own, within a few minutes, once the Virtual Node is
+# enabled -- no manual restart or service ordering required.
 services:
   meshmonitor:
     image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1
     container_name: meshmonitor
     restart: unless-stopped
-    environment:
-      - MESHTASTIC_NODE_IP=192.168.1.50            # <-- change: your radio's IP
-      - ALLOWED_ORIGINS=http://localhost:8080      # the exact address you open the UI at
+    env_file: .env
     ports:
       # The web UI, this machine only. To open it from elsewhere, see the guide.
       - "127.0.0.1:8080:3001"
@@ -35,12 +33,7 @@ services:
     restart: unless-stopped
     depends_on:
       - meshmonitor
-    environment:
-      MTBOT_HOST: meshmonitor          # MeshMonitor, not the radio
-      MTBOT_PORT: "4404"               # the Virtual Node's port
-      MTBOT_CHANNEL: "1"               # <-- change: the test channel's index, as in the app
-      MTBOT_CHANNEL_NAME: TestChannel  # <-- change: that channel's name
-      MTBOT_PLACE: City                # <-- change: where you are
+    env_file: .env
     volumes:
       - ./data:/data                   # reports and rx.log land here
 

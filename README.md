@@ -172,10 +172,16 @@ the source code.
 curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh
 ```
 
-Asks 4 questions (the radio's IP, the test channel's index and name, and your city),
-creates a `mesh-test-bot/` folder with the configuration, and starts the bot. If you'd
-rather read the script before running it, download it and open it: it's about a
-hundred lines.
+Asks a few questions — how the bot should reach the radio (directly, through an
+existing MeshMonitor, or by setting up a new MeshMonitor right here; see [With
+MeshMonitor](#with-meshmonitor-optional) below), the test channel's index and name,
+your city, the message/report prefixes, and whether to run once now or on a recurring
+weekly schedule — press Enter to accept the default shown in brackets for any of them.
+Creates a `mesh-test-bot/` folder with the configuration, and prints the exact
+`docker compose` commands that start it (the installer never starts anything itself:
+you run it, and know what it does). If
+you'd rather read the script before running it, download it and open it: it's about a
+short.
 
 ### By hand (also on Windows)
 
@@ -203,14 +209,15 @@ docker compose down                         # stop
 
 - Reports (`report.txt`, `report.jsonl`) and `rx.log` are in the `data/` folder.
 - To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
-- **At startup**, the bot briefly connects to the radio to check it's reachable and on
+- **At startup** (scheduled mode), the bot briefly connects to the radio to check it's reachable and on
   the right channel: `Startup check OK` in the log means it's set up correctly. If it
   can't connect, it retries for a few minutes, then exits and the container restarts
   (each cycle takes a few minutes, so `docker ps` usually shows `Up` with a low uptime
   rather than `Restarting`; `docker inspect -f '{{.RestartCount}}' mesh-test-bot` climbing
   is a clearer sign) until the setup is fixed, instead of waiting quietly for the first
   scheduled session. `docker compose logs` says what's wrong (usually the host/port in
-  `.env`, or the radio being unreachable).
+  `.env`, or the radio being unreachable). On-demand runs have no startup check: they
+  connect when the session starts, and a failed connection shows in the log.
 - Every option can go in `.env` too, as `MTBOT_<NAME>`: see
   [`defaults.ini`](defaults.ini) for the full list and what each one does.
 
@@ -281,8 +288,11 @@ this covered (`restart: unless-stopped`).
 
 If you want the full message history in a web UI, or need more than one program to
 talk to the radio (which only accepts one TCP client), the bot can connect to
-[MeshMonitor](https://meshmonitor.org)'s **Virtual Node** instead of the radio. Just
-point `MTBOT_HOST` and `MTBOT_PORT` at it: there's an [example
+[MeshMonitor](https://meshmonitor.org)'s **Virtual Node** instead of the radio. The
+installer (above) can set this up for you — answer "set up a new MeshMonitor here"
+when asked how to connect, or "through an existing MeshMonitor" if you already run
+one elsewhere and just need to point the bot at its Virtual Node's address. Doing it
+by hand is just pointing `MTBOT_HOST` and `MTBOT_PORT` at it: there's an [example
 `docker-compose`](install/with-meshmonitor.yml) and a [guide](docs/meshmonitor.md)
 with the steps, the caveats and what was tested. MeshMonitor is an independent project
 and this bot is not affiliated with or endorsed by it.
