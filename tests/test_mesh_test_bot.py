@@ -1528,6 +1528,12 @@ class SessionLimitsTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bot.main(["--config", path, "--schedule", "--count", "11", "--dry-run"])
 
+    def test_a_negative_message_count_is_refused_in_both_modes(self):  # [AC-session-limits-2] (review)
+        for flags in ((), ("--unsafe-limits",)):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit) as cm:
+                self.load("message_count = -1\n", *flags)
+            self.assertIn("cannot be negative", str(cm.exception))
+
     def test_normal_mode_gap_is_two_minutes(self):  # [AC-session-limits-3]
         self.assertEqual(self.load("")["min_gap_seconds"], 120.0)
 

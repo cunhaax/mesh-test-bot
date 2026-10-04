@@ -375,7 +375,8 @@ message cap and the 2-minute gap between your own messages. The report-window mi
 stays. The 2-minute gap is kept whenever each message has at least 2 minutes of session
 to itself; in shorter sessions the gap becomes half of that share (`session ÷ (2 × count)`)
 so that the messages still spread out. The bot prints a warning at startup that lists
-exactly what was relaxed.
+exactly what was relaxed. The report is still written at a random moment after the session, but
+under this flag the minimum wait after the last message is the shortened gap, not 2 minutes.
 
 It is a command-line flag only. It can't be set in `bot.ini`, in an environment variable
 or by the installer, so it can't be switched on by accident in a shared `.env`. Never use

@@ -243,6 +243,8 @@ def _check_limits(cfg, unsafe):
                         ("message_count", count)):
         if not math.isfinite(value):
             sys.exit("`%s` must be a finite number: %r" % (name, value))
+    if count < 0:
+        sys.exit("`message_count` cannot be negative: %r" % count)
     if report < MIN_REPORT_WINDOW_MINUTES:
         sys.exit("`report_window_minutes` below %g: a large multi-hop mesh needs this long to finish "
                  "propagating before the report is written, or stragglers are undercounted: %r"
