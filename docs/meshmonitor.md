@@ -28,22 +28,24 @@ opening any connection to the radio).
 
 ## Installation
 
-1. Download [`install/with-meshmonitor.yml`](../install/with-meshmonitor.yml) into a
-   folder and edit the 5 lines marked `<-- change` (the radio's IP, and the bot's
+**With the installer**: run `install.sh` (see the README's Quick Install) and answer
+"set up a new MeshMonitor here" when asked how the bot should connect. It writes the
+`.env` below for you and starts both services.
+
+**By hand**:
+
+1. Download [`install/with-meshmonitor.yml`](../install/with-meshmonitor.yml) and
+   [`install/meshmonitor.env.example`](../install/meshmonitor.env.example) into a
+   folder, copy the second one to `.env` and adjust it (the radio's IP, and the bot's
    channel, channel name and place).
-2. `docker compose -f with-meshmonitor.yml up -d meshmonitor` (just MeshMonitor first,
-   not the bot yet).
+2. `docker compose -f with-meshmonitor.yml up -d`.
 3. Open `http://localhost:8080`, log in with `admin` / `changeme` and **change the
    password** (click the username, *Change Password*).
-4. **Enable the Virtual Node** (next step).
-5. `docker compose -f with-meshmonitor.yml up -d bot`. At startup the bot briefly
-   connects to check the radio is reachable, retrying for a few minutes and then
-   **exiting** if it never can -- which is what happens on every restart while the
-   Virtual Node isn't enabled yet. Starting it only now just avoids that pointless
-   restart cycle (its own `restart: unless-stopped` recovers either way, within a few
-   minutes). If you start both services together instead, just
-   `docker compose -f with-meshmonitor.yml restart bot` once
-   the Virtual Node is on.
+4. **Enable the Virtual Node** (next step). At startup the bot briefly connects to
+   check the radio is reachable, retrying for a few minutes and then **exiting** if it
+   never can -- which is what happens on every restart before this step is done. Its
+   own `restart: unless-stopped` recovers on its own, within a few minutes, once the
+   Virtual Node is enabled -- no manual restart or service ordering required.
 
 ## Enabling the Virtual Node
 

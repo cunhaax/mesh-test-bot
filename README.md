@@ -172,10 +172,12 @@ the source code.
 curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh
 ```
 
-Asks a few questions (the radio's IP and port, the test channel's index and name, your
-city, the message/report prefixes, and whether to run once now or on a recurring
-weekly schedule) — press Enter to accept the default shown in brackets for any of
-them. Creates a `mesh-test-bot/` folder with the configuration, and starts the bot. If
+Asks a few questions — how the bot should reach the radio (directly, through an
+existing MeshMonitor, or by setting up a new MeshMonitor right here; see [With
+MeshMonitor](#with-meshmonitor-optional) below), the test channel's index and name,
+your city, the message/report prefixes, and whether to run once now or on a recurring
+weekly schedule — press Enter to accept the default shown in brackets for any of them.
+Creates a `mesh-test-bot/` folder with the configuration, and starts the bot(s). If
 you'd rather read the script before running it, download it and open it: it's about a
 hundred lines.
 
@@ -283,8 +285,11 @@ this covered (`restart: unless-stopped`).
 
 If you want the full message history in a web UI, or need more than one program to
 talk to the radio (which only accepts one TCP client), the bot can connect to
-[MeshMonitor](https://meshmonitor.org)'s **Virtual Node** instead of the radio. Just
-point `MTBOT_HOST` and `MTBOT_PORT` at it: there's an [example
+[MeshMonitor](https://meshmonitor.org)'s **Virtual Node** instead of the radio. The
+installer (above) can set this up for you — answer "set up a new MeshMonitor here"
+when asked how to connect, or "through an existing MeshMonitor" if you already run
+one elsewhere and just need to point the bot at its Virtual Node's address. Doing it
+by hand is just pointing `MTBOT_HOST` and `MTBOT_PORT` at it: there's an [example
 `docker-compose`](install/with-meshmonitor.yml) and a [guide](docs/meshmonitor.md)
 with the steps, the caveats and what was tested. MeshMonitor is an independent project
 and this bot is not affiliated with or endorsed by it.

@@ -40,7 +40,7 @@ def read(path):
 def read_env_file(path):
     values = {}
     for line in read(path).splitlines():
-        m = re.fullmatch(r"(MTBOT_\w+)='(.*)'", line)
+        m = re.fullmatch(r"(\w+)='(.*)'", line)
         if m:
             values[m.group(1)] = m.group(2)
     return values
@@ -61,8 +61,10 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(out, name)), name)
 
     def test_answers_from_stdin_in_order(self):
-        # host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
-        p, out = run_installer("10.0.0.7\n4403\n3\nMeuCanal\nPorto\nCustomKey\nCustomRep\nAmerica/New_York\ny\n")
+        # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
+        answers = ["direct", "10.0.0.7", "4403", "3", "MeuCanal", "Porto", "CustomKey", "CustomRep",
+                   "America/New_York", "y"]
+        p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.7", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "3", "MTBOT_CHANNEL_NAME": "MeuCanal",
@@ -70,8 +72,10 @@ class InstallerTest(unittest.TestCase):
             "MTBOT_TIMEZONE": "America/New_York"})
 
     def test_empty_answers_take_the_defaults(self):
-        # port, channel, channel_name, keyword, report_prefix, run-once?, weekday, start_time, timezone: all blank
-        p, out = run_installer("10.0.0.7\n\n\n\nPorto\n\n\n\n\n\n\n")
+        # connection, host, place given; everything else (port, channel, channel_name, keyword,
+        # report_prefix, timezone, run-once?, weekday, start_time) blank -> takes its default
+        answers = ["", "10.0.0.7", "", "", "", "Porto", "", "", "", "", "", ""]
+        p, out = run_installer("\n".join(answers) + "\n")
         self.assertEqual(p.returncode, 0, p.stderr)
         env = read_env_file(os.path.join(out, ".env"))
         self.assertEqual((env["MTBOT_PORT"], env["MTBOT_CHANNEL"], env["MTBOT_CHANNEL_NAME"], env["MTBOT_KEYWORD"],
@@ -112,6 +116,43 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "docker-compose.yml")))
 
+    def test_existing_meshmonitor_connection_just_points_host_and_port_at_it(self):
+        p, out = run_installer(MTB_CONNECTION="existing", MTBOT_HOST="meshmonitor.lan", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor.lan", "4404"))
+        self.assertNotIn("MESHTASTIC_NODE_IP", env)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "docker-compose.once.yml")))  # plain bot-only template
+
+    def test_setup_meshmonitor_connection_fixes_the_bot_at_the_virtual_node(self):
+        p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor", "4404"))
+        self.assertEqual(env["MESHTASTIC_NODE_IP"], "192.168.1.50")
+        self.assertEqual(env["ALLOWED_ORIGINS"], "http://localhost:8080")
+        for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):  # always recurring: asked unconditionally
+            self.assertIn(name, env)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "with-meshmonitor.yml")))
+
+    def test_setup_meshmonitor_requires_the_radio_ip(self):
+        p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("Error", p.stderr)
+        self.assertFalse(os.path.exists(out))
+
+    def test_bad_connection_mode_is_refused(self):
+        p, out = run_installer(MTB_CONNECTION="bogus", MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("MTB_CONNECTION", p.stderr)
+        self.assertFalse(os.path.exists(out))
+
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         self.assertEqual(p.returncode, 0)
@@ -133,8 +174,9 @@ class InstallerTest(unittest.TestCase):
                          ("10.0.0.7", 2, "Canal Teste", "Vila Nova"))
 
     def test_an_empty_channel_name_is_read_as_not_set(self):
-        # host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
-        p, out = run_installer("10.0.0.7\n\n1\n\nPorto\n\n\n\ny\n")
+        # connection, host, port, channel, channel_name (blank), place, keyword, report_prefix, timezone, run-once?
+        answers = ["", "10.0.0.7", "", "1", "", "Porto", "", "", "", "y"]
+        p, out = run_installer("\n".join(answers) + "\n")
         env = read_env_file(os.path.join(out, ".env"))
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MTBOT_")}
         with mock.patch.dict(os.environ, dict(clean, **env), clear=True):
@@ -174,9 +216,9 @@ def run_like_curl_pipe(answers):
 @unittest.skipIf(shutil.which("sh") is None or not hasattr(os, "fork"), "needs a POSIX sh and a pty")
 class PipedInstallerTest(unittest.TestCase):
     def test_curl_pipe_sh_asks_on_the_terminal(self):
-        # host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
+        # connection, host, port, channel, channel_name, place, keyword, report_prefix, timezone, run-once?
         code, screen, out = run_like_curl_pipe(
-            ["10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "2", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
         self.assertEqual(code, 0, screen)
         self.assertEqual(read_env_file(os.path.join(out, ".env")), {
             "MTBOT_HOST": "10.0.0.4", "MTBOT_PORT": "4403", "MTBOT_CHANNEL": "2", "MTBOT_CHANNEL_NAME": "CanalX",
@@ -186,7 +228,7 @@ class PipedInstallerTest(unittest.TestCase):
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(
-            ["10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
+            ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
         self.assertNotEqual(code, 0)
         self.assertIn("0 to 7", screen)
         self.assertFalse(os.path.exists(out))
@@ -230,12 +272,22 @@ class InstalledFilesTest(unittest.TestCase):
         ports = [str(p) for p in services["meshmonitor"]["ports"]]
         self.assertTrue(all(p.startswith("127.0.0.1:") for p in ports))  # the web interface: this machine only
         self.assertFalse(any("4404" in p for p in ports))  # the virtual node has no authentication: never published
-        env = services["bot"]["environment"]
-        self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor", "4404"))
-        for name in env:
-            self.assertIn(name[len(bot.ENV_PREFIX):].lower(), bot.DEFAULTS, name)
+        self.assertEqual(services["bot"]["env_file"], ".env")
+        self.assertEqual(services["meshmonitor"]["env_file"], ".env")
         direct = yaml.safe_load(read(os.path.join(INSTALL, "docker-compose.yml")))["services"]["bot"]
         self.assertEqual(services["bot"]["image"], direct["image"])  # the same published image
+
+    def test_the_meshmonitor_env_example_has_the_fixed_virtual_node_address(self):
+        env = {}
+        for line in read(os.path.join(INSTALL, "meshmonitor.env.example")).splitlines():
+            if m := re.match(r"(\w+)=(.*)", line):
+                env[m.group(1)] = m.group(2)
+        self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor", "4404"))
+        for name in ("MESHTASTIC_NODE_IP", "ALLOWED_ORIGINS", "MTBOT_CHANNEL", "MTBOT_CHANNEL_NAME", "MTBOT_PLACE"):
+            self.assertIn(name, env)
+        for name in env:
+            if name.startswith(bot.ENV_PREFIX):
+                self.assertIn(name[len(bot.ENV_PREFIX):].lower(), bot.DEFAULTS, name)
 
     def test_the_installer_and_the_image_name_agree_with_the_workflow(self):
         import yaml

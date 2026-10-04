@@ -9,11 +9,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Variables (all optional):
+#   MTB_CONNECTION=direct|existing|setup   how the bot reaches the radio: directly,
+#                  through an existing MeshMonitor, or a new MeshMonitor set up here
+#                  (anything else stops the install)
 #   MTBOT_HOST, MTBOT_PORT, MTBOT_CHANNEL, MTBOT_CHANNEL_NAME, MTBOT_PLACE,
 #   MTBOT_KEYWORD, MTBOT_REPORT_PREFIX, MTBOT_WEEKDAY, MTBOT_START_TIME,
 #   MTBOT_TIMEZONE   answers, skip the matching prompt
+#   MESHTASTIC_NODE_IP, ALLOWED_ORIGINS   only with MTB_CONNECTION=setup (MeshMonitor's own settings)
 #   MTB_ONESHOT=1  skip the weekday/start-time prompts, run once now instead
-#                  (1/0 or y/yes/n/no only -- anything else stops the install)
+#                  (1/0 or y/yes/n/no only -- anything else stops the install; not
+#                  asked at all with MTB_CONNECTION=setup, which is always recurring)
 #   MTB_DIR       folder to create (default ./mesh-test-bot)
 #   MTB_SOURCE    local folder with docker-compose.yml and env.example, instead of downloading them
 #   MTB_RAW_BASE  where to download them from (default GitHub)
@@ -65,20 +70,42 @@ fi
 [ ! -e "$DIR/.env" ] || die "$DIR/.env already exists: edit it by hand, or delete it to start over"
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
-ask MTBOT_HOST "Radio's IP (on your network)"
-ask MTBOT_PORT "Radio's TCP port" 4403
+ask MTB_CONNECTION "Connect directly to the radio, through an existing MeshMonitor, or set up a new MeshMonitor here? [direct/existing/setup]" direct
+case $MTB_CONNECTION in
+    direct|d) MTB_CONNECTION=direct ;;
+    existing|e) MTB_CONNECTION=existing ;;
+    setup|s) MTB_CONNECTION=setup ;;
+    *) die "MTB_CONNECTION must be direct/existing/setup: $MTB_CONNECTION" ;;
+esac
+
+if [ "$MTB_CONNECTION" = setup ]; then
+    ask MESHTASTIC_NODE_IP "Radio's IP (on your network; MeshMonitor connects to it)"
+    ask ALLOWED_ORIGINS "Address you'll open the MeshMonitor web UI at" "http://localhost:8080"
+    MTBOT_HOST=meshmonitor
+    MTBOT_PORT=4404
+elif [ "$MTB_CONNECTION" = existing ]; then
+    ask MTBOT_HOST "That MeshMonitor's address (its Virtual Node host, on your network)"
+    ask MTBOT_PORT "Its Virtual Node port" 4404
+else
+    ask MTBOT_HOST "Radio's IP (on your network)"
+    ask MTBOT_PORT "Radio's TCP port" 4403
+fi
 ask MTBOT_CHANNEL "Test channel index on the radio, 0 to 7 (as the app shows it)" 1
 ask MTBOT_CHANNEL_NAME "That channel's name (recommended; empty = do not check)"
 ask MTBOT_PLACE "Where you are (city)"
 ask MTBOT_KEYWORD "Message prefix (tags this bot's messages; may be several words)" MTBOT
 ask MTBOT_REPORT_PREFIX "Report-line prefix (starts every line of the readable report)" ACK
 ask MTBOT_TIMEZONE "IANA timezone for report timestamps (e.g. Europe/Lisbon)" Europe/Lisbon
-ask MTB_ONESHOT "Run once right now instead of on a recurring weekly schedule?" n
-case $MTB_ONESHOT in
-    1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
-    0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
-    *) die "MTB_ONESHOT must be 1/0 or y/yes/n/no: $MTB_ONESHOT" ;;
-esac
+if [ "$MTB_CONNECTION" = setup ]; then
+    MTB_ONESHOT=0  # a new MeshMonitor setup is a permanent installation, not a quick test
+else
+    ask MTB_ONESHOT "Run once right now instead of on a recurring weekly schedule?" n
+    case $MTB_ONESHOT in
+        1|[Yy]|[Yy][Ee][Ss]) MTB_ONESHOT=1 ;;
+        0|[Nn]|[Nn][Oo]) MTB_ONESHOT=0 ;;
+        *) die "MTB_ONESHOT must be 1/0 or y/yes/n/no: $MTB_ONESHOT" ;;
+    esac
+fi
 if [ "$MTB_ONESHOT" = 0 ]; then
     ask MTBOT_WEEKDAY "Day of the week to run (monday..sunday, or 'daily')" saturday
     ask MTBOT_START_TIME "Start time, 24h (HH:MM)" 06:00
@@ -86,7 +113,7 @@ fi
 
 # Validation: .env stores the values inside single quotes, so no quotes or '|' allowed.
 for v in MTBOT_HOST MTBOT_PORT MTBOT_CHANNEL MTBOT_CHANNEL_NAME MTBOT_PLACE MTBOT_KEYWORD \
-         MTBOT_REPORT_PREFIX MTBOT_WEEKDAY MTBOT_START_TIME MTBOT_TIMEZONE; do
+         MTBOT_REPORT_PREFIX MTBOT_WEEKDAY MTBOT_START_TIME MTBOT_TIMEZONE MESHTASTIC_NODE_IP ALLOWED_ORIGINS; do
     eval "val=\${$v:-}"
     case $val in *"'"* | *'"'* | *'|'* | *'#'* ) die "$v cannot contain quotes, '|' or '#': $val" ;; esac
 done
@@ -95,6 +122,10 @@ case $MTBOT_HOST in *[!A-Za-z0-9._:-]*) die "invalid radio IP or hostname: $MTBO
 case $MTBOT_PORT in *[!0-9]*) die "the port must be a number: $MTBOT_PORT" ;; esac
 case $MTBOT_CHANNEL in [0-7]) ;; *) die "the channel must be a number from 0 to 7: $MTBOT_CHANNEL" ;; esac
 [ -n "$MTBOT_PLACE" ] || die "missing the place"
+if [ "$MTB_CONNECTION" = setup ]; then
+    [ -n "$MESHTASTIC_NODE_IP" ] || die "missing the radio's IP"
+    case $MESHTASTIC_NODE_IP in *[!A-Za-z0-9._:-]*) die "invalid radio IP or hostname: $MESHTASTIC_NODE_IP" ;; esac
+fi
 if [ "$MTB_ONESHOT" = 0 ]; then
     MTBOT_WEEKDAY=$(printf '%s' "$MTBOT_WEEKDAY" | tr 'A-Z' 'a-z')
     case $MTBOT_WEEKDAY in monday|tuesday|wednesday|thursday|friday|saturday|sunday|daily) ;;
@@ -104,7 +135,9 @@ if [ "$MTB_ONESHOT" = 0 ]; then
 fi
 
 mkdir -p "$DIR/data"
-if [ "$MTB_ONESHOT" = 1 ]; then
+if [ "$MTB_CONNECTION" = setup ]; then
+    fetch with-meshmonitor.yml "$DIR/docker-compose.yml"
+elif [ "$MTB_ONESHOT" = 1 ]; then
     fetch docker-compose.once.yml "$DIR/docker-compose.yml"
 else
     fetch docker-compose.yml "$DIR/docker-compose.yml"
@@ -112,6 +145,10 @@ fi
 fetch env.example "$DIR/env.example"
 {
     say "# Generated by install.sh. All available options are in env.example."
+    if [ "$MTB_CONNECTION" = setup ]; then
+        say "MESHTASTIC_NODE_IP='$MESHTASTIC_NODE_IP'"
+        say "ALLOWED_ORIGINS='$ALLOWED_ORIGINS'"
+    fi
     say "MTBOT_HOST='$MTBOT_HOST'"
     say "MTBOT_PORT='$MTBOT_PORT'"
     say "MTBOT_CHANNEL='$MTBOT_CHANNEL'"
@@ -126,7 +163,12 @@ fetch env.example "$DIR/env.example"
     fi
 } > "$DIR/.env"
 say "Done: configuration in $DIR/.env"
-if [ "$MTB_ONESHOT" = 1 ]; then
+if [ "$MTB_CONNECTION" = setup ]; then
+    say "Starting MeshMonitor + the bot. Open $ALLOWED_ORIGINS, log in with admin / changeme,"
+    say "change the password, and enable the Virtual Node for this radio (port 4404,"
+    say "admin commands OFF) -- see docs/meshmonitor.md for exact steps."
+    say "The bot retries connecting on its own and will succeed within a few minutes of that."
+elif [ "$MTB_ONESHOT" = 1 ]; then
     say "Runs once now, then the container stops (restart it with 'docker compose up -d' again)."
 else
     say "Schedule: every $MTBOT_WEEKDAY at $MTBOT_START_TIME ($MTBOT_TIMEZONE)."

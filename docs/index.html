@@ -82,13 +82,13 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
   <h2>Get started</h2>
   <p>One command, if you already have Docker:</p>
   <pre><code>curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh</code></pre>
-  <p>It asks a few questions — the radio's IP, the test channel, your city, the message
-  prefixes, and whether to run once now or on a recurring schedule — press Enter for
-  any default. Then it starts the bot. See the README for installing from source or
-  without Docker.</p>
-  <p>Already running <a href="https://meshmonitor.org">MeshMonitor</a>? Skip the radio's
-  IP and point the bot at its Virtual Node instead — see the
-  <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">MeshMonitor guide</a>.</p>
+  <p>It asks a few questions — how the bot should reach the radio (directly, through an
+  existing <a href="https://meshmonitor.org">MeshMonitor</a>, or by setting one up right
+  here), the test channel, your city, the message prefixes, and whether to run once now
+  or on a recurring schedule — press Enter for any default. Then it starts the bot(s).
+  See the README for installing from source or without Docker, and the
+  <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">MeshMonitor guide</a>
+  for the details of that path.</p>
 
   <h2>📐 Size your test</h2>
   <p>LoRa has no real collision avoidance, so many stations sharing a short window can
