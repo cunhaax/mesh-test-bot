@@ -1590,6 +1590,9 @@ class SessionLimitsTest(unittest.TestCase):
         cfg = self.load("listen_minutes = 30\nmessage_count = 0\n")
         self.assertEqual(bot.plan_send_times(cfg, datetime(2026, 9, 19, 21, 0), datetime(2026, 9, 19, 21, 30)), [])
 
+    def test_unsafe_limits_keeps_the_two_minute_gap_when_the_segments_allow_it(self):  # [AC-session-limits-4]
+        self.assertEqual(self.load("listen_minutes = 30\nmessage_count = 10\n", "--unsafe-limits")["min_gap_seconds"], 120.0)
+
     def test_unsafe_limits_on_a_long_session_keeps_the_two_minute_gap(self):  # [EDGE-session-limits-6]
         with self.assertLogs("bot", "WARNING") as logs:
             cfg = self.load("", "--unsafe-limits")

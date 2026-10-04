@@ -257,7 +257,8 @@ def _check_limits(cfg, unsafe):
         return MIN_GAP_SECONDS
     if listen <= 0:
         sys.exit("`listen_minutes` must be above 0 with --unsafe-limits: %r" % listen)
-    gap = min(MIN_GAP_SECONDS, listen * 60 / (2 * max(count, 1)))
+    segment = listen * 60 / max(count, 1)
+    gap = MIN_GAP_SECONDS if segment >= MIN_GAP_SECONDS else segment / 2
     log.warning("--unsafe-limits, for a private-channel load test only. Relaxed: session length (normally "
                 "at least %g min; now %g min), message cap (normally %d; now %d), minimum gap between our own "
                 "messages (normally %g s; now %g s). Still enforced: report window of at least %g min.",

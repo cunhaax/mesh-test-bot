@@ -355,9 +355,10 @@ coordinated beyond what already has to be agreed for people to hear each other a
 For a stress test on a channel only you use (for example several of your own radios),
 add `--unsafe-limits` to the command line. It lifts the minimum session length, the
 message cap and the 2-minute gap between your own messages. The report-window minimum
-stays. With it, the gap shrinks with the session so that short sessions still spread the
-messages out: it is `session ÷ (2 × count)`, and never more than 2 minutes. The bot
-prints a warning at startup that lists exactly what was relaxed.
+stays. The 2-minute gap is kept whenever each message has at least 2 minutes of session
+to itself; in shorter sessions the gap becomes half of that share (`session ÷ (2 × count)`)
+so that the messages still spread out. The bot prints a warning at startup that lists
+exactly what was relaxed.
 
 It is a command-line flag only. It can't be set in `bot.ini`, in an environment variable
 or by the installer, so it can't be switched on by accident in a shared `.env`. Never use
