@@ -363,10 +363,7 @@ class InstalledFilesTest(unittest.TestCase):
                  os.path.join(ROOT, "docs", "meshmonitor.md")]
         files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
         for path in files:
-            text = read(path)
-            if path.endswith("README.md"):  # the upgrade note names them on purpose
-                text = text[:text.index("## Upgrading from an older version")] + text[text.index("## Installing without Docker"):]
-            text = text.lower()
+            text = read(path).lower()
             for word in self.REMOVED:
                 with self.subTest(file=os.path.basename(path), word=word):
                     self.assertNotIn(word.lower(), text)
