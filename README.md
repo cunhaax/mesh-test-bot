@@ -82,7 +82,8 @@ docker compose down                         # stop
 ```
 
 - Reports (`report.txt`, `report.jsonl`) and `rx.log` are in the `data/` folder.
-- To change the configuration, edit `.env` and run `docker compose up -d --force-recreate`.
+- To change the configuration, edit `.env` and run `docker compose up -d` (Compose recreates the
+  container when its settings change).
 - **At startup** (scheduled mode), the bot briefly connects to the radio to check it's reachable and on
   the right channel: `Startup check OK` in the log means it's set up correctly. If it
   can't connect, it retries for a few minutes, then exits and the container restarts
