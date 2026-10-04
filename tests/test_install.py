@@ -84,15 +84,40 @@ class InstallerTest(unittest.TestCase):
 
     def test_bad_answers_are_refused_and_nothing_is_created(self):
         good = dict(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
-        for name, bad in (("MTBOT_CHANNEL", "8"), ("MTBOT_CHANNEL", "abc"), ("MTBOT_HOST", "10.0.0.7 x"),
-                          ("MTBOT_HOST", "a;b"), ("MTBOT_PLACE", "It's"), ("MTBOT_PLACE", "A|B"), ("MTBOT_PLACE", "A #b"),
-                          ("MTBOT_CHANNEL_NAME", 'a"b'), ("MTBOT_PORT", "abc"), ("MTBOT_WEEKDAY", "funday"),
-                          ("MTBOT_START_TIME", "25:99"), ("MTBOT_START_TIME", "25:30"), ("MTB_ONESHOT", "true")):
+        cases = (
+            ("MTBOT_CHANNEL", "8", "from 0 to 7"), ("MTBOT_CHANNEL", "abc", "from 0 to 7"),
+            ("MTBOT_HOST", "10.0.0.7 x", "invalid radio IP"), ("MTBOT_HOST", "a;b", "invalid radio IP"),
+            ("MTBOT_PLACE", "It's", "cannot contain"), ("MTBOT_PLACE", "A|B", "cannot contain"),
+            ("MTBOT_PLACE", "A #b", "cannot contain"), ("MTBOT_PLACE", "A\nMTBOT_HOST=x", "line breaks"),
+            ("MTBOT_PLACE", "x" * 170, "too long"),
+            ("MTBOT_CHANNEL_NAME", 'a"b', "cannot contain"), ("MTBOT_PORT", "abc", "must be a number"),
+            ("MTBOT_PORT", "99999", "between 1 and 65535"), ("MTBOT_PORT", "0", "between 1 and 65535"),
+            ("MTBOT_KEYWORD", "!!!", "letter or digit"), ("MTBOT_TIMEZONE", "Mars/Olympus", "unknown timezone"),
+            ("MTBOT_WEEKDAY", "funday", "weekday must"), ("MTBOT_START_TIME", "25:99", "start time must"),
+            ("MTBOT_START_TIME", "25:30", "start time must"), ("MTB_ONESHOT", "true", "MTB_ONESHOT must"),
+        )
+        for name, bad, expected in cases:
             with self.subTest(**{name: bad}):
                 p, out = run_installer(**dict(good, **{name: bad}))
                 self.assertNotEqual(p.returncode, 0)
-                self.assertIn("Error", p.stderr)
+                self.assertIn(expected, p.stderr)
                 self.assertFalse(os.path.exists(out))
+
+    def test_a_docker_compose_file_in_the_working_directory_is_not_used_when_piped(self):
+        work = tempfile.mkdtemp()
+        with open(os.path.join(work, "docker-compose.yml"), "w", encoding="utf-8") as f:
+            f.write("# not ours\n")
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MTBOT_", "MTB_"))}
+        env.update(MTB_DIR=out, MTB_RAW_BASE="file://" + INSTALL, MTB_ONESHOT="1", MTB_CONNECTION="direct",
+                   MTBOT_HOST="10.0.0.7", MTBOT_PORT="4403", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
+                   MTBOT_PLACE="Porto", MTBOT_KEYWORD="MTBOT", MTBOT_REPORT_PREFIX="ACK",
+                   MTBOT_TIMEZONE="Europe/Lisbon")
+        p = subprocess.run(["sh"], input=read(os.path.join(INSTALL, "install.sh")), capture_output=True, text=True,
+                           cwd=work, env=env, timeout=30, start_new_session=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
+                         read(os.path.join(INSTALL, "docker-compose.once.yml")))
 
     def test_oneshot_mode_skips_weekday_and_start_time_but_keeps_timezone(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C",
@@ -278,7 +303,7 @@ class PipedInstallerTest(unittest.TestCase):
         code, screen, out = run_like_curl_pipe(
             ["direct", "10.0.0.4", "4403", "9", "CanalX", "Braga", "MTBOT", "ACK", "Europe/Lisbon", "y"])
         self.assertNotEqual(code, 0)
-        self.assertIn("0 to 7", screen)
+        self.assertIn("channel must be a number from 0 to 7: 9", screen)
         self.assertFalse(os.path.exists(out))
 
 

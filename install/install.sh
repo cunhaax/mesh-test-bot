@@ -29,9 +29,11 @@ REPO="${MTB_REPO:-cunhaax/mesh-test-bot}"
 RAW="${MTB_RAW_BASE:-https://raw.githubusercontent.com/$REPO/master/install}"
 DIR="${MTB_DIR:-mesh-test-bot}"
 SRC="${MTB_SOURCE:-}"
-if [ -z "$SRC" ] && [ -f "$(dirname "$0")/docker-compose.yml" ]; then  # run from a local copy
-    SRC="$(cd "$(dirname "$0")" && pwd)"
-fi
+case $0 in */install.sh)  # run from a local copy, not piped ("sh" as $0)
+    here="$(cd "$(dirname "$0")" && pwd)"
+    if [ -z "$SRC" ] && [ -f "$here/docker-compose.yml" ] && [ -f "$here/docker-compose.once.yml" ] \
+        && [ -f "$here/with-meshmonitor.yml" ] && [ -f "$here/env.example" ]; then SRC="$here"; fi ;;
+esac
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
@@ -111,12 +113,23 @@ vars_to_check="MTBOT_HOST MTBOT_PORT MTBOT_CHANNEL MTBOT_CHANNEL_NAME MTBOT_PLAC
 for v in $vars_to_check; do
     eval "val=\${$v:-}"
     case $val in *"'"* | *'"'* | *'|'* | *'#'* ) die "$v cannot contain quotes, '|' or '#': $val" ;; esac
+    case $val in *[[:cntrl:]]*) die "$v cannot contain line breaks or control characters" ;; esac
 done
 [ -n "$MTBOT_HOST" ] || die "missing the radio's IP"
 case $MTBOT_HOST in *[!A-Za-z0-9._:-]*) die "invalid radio IP or hostname: $MTBOT_HOST" ;; esac
-case $MTBOT_PORT in *[!0-9]*) die "the port must be a number: $MTBOT_PORT" ;; esac
+case $MTBOT_PORT in *[!0-9]*|'') die "the port must be a number: $MTBOT_PORT" ;; esac
+[ "$MTBOT_PORT" -ge 1 ] && [ "$MTBOT_PORT" -le 65535 ] 2>/dev/null || die "the port must be between 1 and 65535: $MTBOT_PORT"
 case $MTBOT_CHANNEL in [0-7]) ;; *) die "the channel must be a number from 0 to 7: $MTBOT_CHANNEL" ;; esac
 [ -n "$MTBOT_PLACE" ] || die "missing the place"
+case $MTBOT_KEYWORD in *[A-Za-z0-9]*) ;; *) die "the message prefix needs at least one letter or digit: $MTBOT_KEYWORD" ;; esac
+case $MTBOT_TIMEZONE in *[!A-Za-z0-9_/+-]*|'') die "invalid timezone name: $MTBOT_TIMEZONE" ;; esac
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import zoneinfo' 2>/dev/null; then
+    python3 -c 'import sys, zoneinfo; zoneinfo.ZoneInfo(sys.argv[1])' "$MTBOT_TIMEZONE" 2>/dev/null \
+        || die "unknown timezone: $MTBOT_TIMEZONE"
+fi
+# The bot's own length check: 200 bytes with a 16-byte name and "99/99" leaves 170 for prefix + place.
+bytes=$(printf '%s%s' "$MTBOT_KEYWORD" "$MTBOT_PLACE" | LC_ALL=C wc -c | tr -d ' ')
+[ "$bytes" -le 170 ] || die "prefix and place together are too long for one 200-byte message (max 170 bytes, now $bytes)"
 if [ "$MTB_CONNECTION" = setup ]; then
     [ -n "$MESHTASTIC_NODE_IP" ] || die "missing the radio's IP"
     case $MESHTASTIC_NODE_IP in *[!A-Za-z0-9._:-]*) die "invalid radio IP or hostname: $MESHTASTIC_NODE_IP" ;; esac
@@ -174,18 +187,20 @@ if [ "$MTB_CONNECTION" = setup ]; then
     if [ "$MTB_ONESHOT" = 1 ]; then
         say "  Then, each time you want a session:"
         say "  docker compose run --rm bot --now --fixed-schedule"
-        say "    runs one session now, using the duration and message settings in .env;"
-        say "    the bot container stops when it is done. MeshMonitor keeps running."
+        say "    runs one session now, messages every MTBOT_INTERVAL_MINUTES, report at the end of"
+        say "    MTBOT_LISTEN_MINUTES (both in $DIR/.env); the bot container stops, MeshMonitor keeps running."
     else
         say "  The bot retries connecting on its own, and succeeds within a few minutes of that."
     fi
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "  docker compose up -d"
-    say "    runs one session now, using the duration and message settings in .env;"
-    say "    the container stops when it is done. Run the same command again for another."
+    say "    runs one session now, messages every MTBOT_INTERVAL_MINUTES, report at the end of"
+    say "    MTBOT_LISTEN_MINUTES (both in $DIR/.env); the container stops when it is done."
+    say "    Run the same command again for another session."
 else
     say "  docker compose up -d"
-    say "    starts the bot; it runs every $MTBOT_WEEKDAY at $MTBOT_START_TIME ($MTBOT_TIMEZONE)"
+    if [ "$MTBOT_WEEKDAY" = daily ]; then when="every day"; else when="every $MTBOT_WEEKDAY"; fi
+    say "    starts the bot; it runs $when at $MTBOT_START_TIME ($MTBOT_TIMEZONE)"
     say "    and keeps running until you stop it."
 fi
 say ""
