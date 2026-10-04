@@ -41,10 +41,8 @@
   <div class="grid">
     <div class="card">
       <h3>📤 Sends, on a schedule</h3>
-      <p>A few short messages on your test channel, spread at random moments so a whole
-      community doesn't transmit at once. Every session is held to limits (at most 10 messages,
-      at least 30 minutes of listening, at least 10 minutes for the report); a private-channel load
-      test can lift some of them with <code>--unsafe-limits</code>, see the README.</p>
+      <p>A few short messages on your test channel, at random moments, so a whole
+      community doesn't transmit at once.</p>
     </div>
     <div class="card">
       <h3>👂 Listens the whole time</h3>
@@ -60,6 +58,11 @@
       <h3>🤖 Runs unattended</h3>
       <p>Docker image for amd64, arm64 and arm/v7 (Raspberry Pi included). Repeats itself
       every week, recovers from radio reboots and WiFi drops on its own.</p>
+    </div>
+    <div class="card">
+      <h3>🗂️ Several tests, one radio</h3>
+      <p>Run more than one scheduled test: one bot per test, each on its own schedule, all
+      through the same MeshMonitor. <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/advanced-multiple-bots.md">How to set it up</a>.</p>
     </div>
   </div>
 
@@ -140,8 +143,9 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
     <p class="calc-note">Rough model: the standard LoRa time-on-air formula (Semtech
     AN1200.13) times an estimated number of on-air retransmissions. Not a guarantee, and
     not enforced by the bot itself — <code>message_count</code> is capped at 10 and
-    <code>listen_minutes</code> has a 30-minute floor regardless of this calculator (see
-    the README's Session limits).</p>
+    <code>listen_minutes</code> has a 30-minute floor, and the report window is at least 10
+    minutes, regardless of this calculator. A private-channel load test can lift the first two
+    with <code>--unsafe-limits</code> (see the README's Session limits).</p>
   </div>
 
   <h2>Links</h2>
