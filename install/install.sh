@@ -18,7 +18,9 @@
 #   MESHTASTIC_NODE_IP, ALLOWED_ORIGINS   only with MTB_CONNECTION=setup (MeshMonitor's own settings)
 #   MTB_ONESHOT=1  skip the weekday/start-time prompts, run once now instead
 #                  (1/0 or y/yes/n/no only -- anything else stops the install; not
-#                  asked at all with MTB_CONNECTION=setup, which is always recurring)
+#                  asked at all with MTB_CONNECTION=setup, which is always recurring
+#                  and also always fixes MTBOT_HOST/MTBOT_PORT at meshmonitor:4404,
+#                  silently overriding any pre-set value for those three)
 #   MTB_DIR       folder to create (default ./mesh-test-bot)
 #   MTB_SOURCE    local folder with docker-compose.yml and env.example, instead of downloading them
 #   MTB_RAW_BASE  where to download them from (default GitHub)
@@ -71,6 +73,7 @@ fi
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
 ask MTB_CONNECTION "Connect directly to the radio, through an existing MeshMonitor, or set up a new MeshMonitor here? [direct/existing/setup]" direct
+MTB_CONNECTION=$(printf '%s' "$MTB_CONNECTION" | tr 'A-Z' 'a-z')
 case $MTB_CONNECTION in
     direct|d) MTB_CONNECTION=direct ;;
     existing|e) MTB_CONNECTION=existing ;;
@@ -112,8 +115,10 @@ if [ "$MTB_ONESHOT" = 0 ]; then
 fi
 
 # Validation: .env stores the values inside single quotes, so no quotes or '|' allowed.
-for v in MTBOT_HOST MTBOT_PORT MTBOT_CHANNEL MTBOT_CHANNEL_NAME MTBOT_PLACE MTBOT_KEYWORD \
-         MTBOT_REPORT_PREFIX MTBOT_WEEKDAY MTBOT_START_TIME MTBOT_TIMEZONE MESHTASTIC_NODE_IP ALLOWED_ORIGINS; do
+vars_to_check="MTBOT_HOST MTBOT_PORT MTBOT_CHANNEL MTBOT_CHANNEL_NAME MTBOT_PLACE MTBOT_KEYWORD \
+    MTBOT_REPORT_PREFIX MTBOT_WEEKDAY MTBOT_START_TIME MTBOT_TIMEZONE"
+[ "$MTB_CONNECTION" != setup ] || vars_to_check="$vars_to_check MESHTASTIC_NODE_IP ALLOWED_ORIGINS"
+for v in $vars_to_check; do
     eval "val=\${$v:-}"
     case $val in *"'"* | *'"'* | *'|'* | *'#'* ) die "$v cannot contain quotes, '|' or '#': $val" ;; esac
 done
@@ -166,7 +171,7 @@ say "Done: configuration in $DIR/.env"
 if [ "$MTB_CONNECTION" = setup ]; then
     say "Starting MeshMonitor + the bot. Open $ALLOWED_ORIGINS, log in with admin / changeme,"
     say "change the password, and enable the Virtual Node for this radio (port 4404,"
-    say "admin commands OFF) -- see docs/meshmonitor.md for exact steps."
+    say "admin commands OFF) -- see https://github.com/$REPO/blob/master/docs/meshmonitor.md for exact steps."
     say "The bot retries connecting on its own and will succeed within a few minutes of that."
 elif [ "$MTB_ONESHOT" = 1 ]; then
     say "Runs once now, then the container stops (restart it with 'docker compose up -d' again)."

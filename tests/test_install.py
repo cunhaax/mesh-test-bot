@@ -116,15 +116,41 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "docker-compose.yml")))
 
+    def test_direct_connection_never_writes_meshmonitor_only_vars(self):
+        p, out = run_installer(MTB_CONNECTION="direct", MTBOT_HOST="1.2.3.4", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        for name in ("MESHTASTIC_NODE_IP", "ALLOWED_ORIGINS"):
+            self.assertNotIn(name, env)
+
     def test_existing_meshmonitor_connection_just_points_host_and_port_at_it(self):
         p, out = run_installer(MTB_CONNECTION="existing", MTBOT_HOST="meshmonitor.lan", MTBOT_CHANNEL="1",
                                 MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
         self.assertEqual(p.returncode, 0, p.stderr)
         env = read_env_file(os.path.join(out, ".env"))
         self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor.lan", "4404"))
-        self.assertNotIn("MESHTASTIC_NODE_IP", env)
+        for name in ("MESHTASTIC_NODE_IP", "ALLOWED_ORIGINS"):
+            self.assertNotIn(name, env)
         self.assertEqual(read(os.path.join(out, "docker-compose.yml")),
                          read(os.path.join(INSTALL, "docker-compose.once.yml")))  # plain bot-only template
+
+    def test_connection_mode_is_case_insensitive(self):
+        p, out = run_installer(MTB_CONNECTION="Existing", MTBOT_HOST="meshmonitor.lan", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual(env["MTBOT_PORT"], "4404")  # took the "existing" branch's default, not "direct"'s 4403
+
+    def test_setup_mode_silently_overrides_a_preset_oneshot_and_host(self):
+        p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1",
+                                MTBOT_HOST="1.2.3.4", MTBOT_PORT="9999")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        env = read_env_file(os.path.join(out, ".env"))
+        self.assertEqual((env["MTBOT_HOST"], env["MTBOT_PORT"]), ("meshmonitor", "4404"))
+        for name in ("MTBOT_WEEKDAY", "MTBOT_START_TIME"):  # still recurring, oneshot=1 was overridden too
+            self.assertIn(name, env)
 
     def test_setup_meshmonitor_connection_fixes_the_bot_at_the_virtual_node(self):
         p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP="192.168.1.50", MTBOT_CHANNEL="1",
