@@ -65,7 +65,9 @@ fetch() {  # fetch <file> <destination>
     fi
 }
 
-[ ! -e "$DIR/.env" ] || die "$DIR/.env already exists: edit it by hand, or delete it to start over"
+for f in .env docker-compose.yml env.example; do
+    [ ! -e "$DIR/$f" ] || die "$DIR/$f already exists: edit it by hand, or delete the generated files to start over (your data/ folder is kept)"
+done
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
 ask MTB_CONNECTION "Connect directly to the radio, through an existing MeshMonitor, or set up a new MeshMonitor here? [direct/existing/setup]" direct

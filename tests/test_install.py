@@ -226,6 +226,17 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("docker compose up -d", p.stdout)
         self.assertIn("Nothing is running yet", p.stdout)
 
+    def test_an_existing_compose_file_alone_is_never_overwritten(self):  # review: generated files, not only .env
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        os.makedirs(out)
+        with open(os.path.join(out, "docker-compose.yml"), "w", encoding="utf-8") as f:
+            f.write("# my own edits\n")
+        p, _ = run_installer(MTB_DIR=out, MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("docker-compose.yml already exists", p.stderr)
+        self.assertEqual(read(os.path.join(out, "docker-compose.yml")), "# my own edits\n")
+        self.assertFalse(os.path.exists(os.path.join(out, ".env")))
+
     def test_it_never_overwrites_an_existing_configuration(self):
         p, out = run_installer(MTBOT_HOST="10.0.0.7", MTBOT_CHANNEL="1", MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto")
         self.assertEqual(p.returncode, 0)
