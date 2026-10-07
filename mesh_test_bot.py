@@ -70,6 +70,9 @@ import socket
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
@@ -78,6 +81,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger("bot")
 
 ENV_PREFIX = "MTBOT_"  # environment variables: MTBOT_HOST, MTBOT_PLACE...
+TELEGRAM_MAX_CHARS = 4096  # Telegram's limit for one message
+TELEGRAM_TIMEOUT_SECONDS = 15
 SCHEMA = 2  # version of the JSON report
 MAX_TEXT_BYTES = 200  # a Meshtastic text message holds about this much
 MIN_EPOCH = 1_000_000_000  # a packet time below this (2001) is not a real clock reading
@@ -1110,6 +1115,48 @@ def check_radio(cfg, factory=None, timeout=None):
     return result
 
 
+def _telegram_chunks(text, limit=TELEGRAM_MAX_CHARS):
+    """`text` in pieces of at most `limit` characters, cut at line breaks where possible."""
+    chunks, current = [], ""
+    for line in text.split("\n"):
+        while len(line) > limit:  # a single line over the limit: cut it, nothing else fits
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if current and len(current) + 1 + len(line) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = current + "\n" + line if current else line
+    chunks.append(current)
+    return chunks
+
+
+def send_telegram(cfg, text):
+    """Send the text report to the Telegram chat in `telegram_chat_id`, if a bot token and
+    a chat are set. Never raises: the report is already on disk, and a Telegram outage must
+    not take the session down. The token is part of the URL, so errors are logged by type
+    only, never with the request."""
+    token, chat = cfg.get("telegram_bot_token", ""), cfg.get("telegram_chat_id", "")
+    if not token or not chat:
+        return
+    url = "https://api.telegram.org/bot%s/sendMessage" % token
+    try:
+        for chunk in _telegram_chunks(text):
+            data = urllib.parse.urlencode({"chat_id": chat, "text": chunk}).encode()
+            with urllib.request.urlopen(urllib.request.Request(url, data=data),
+                                        timeout=TELEGRAM_TIMEOUT_SECONDS):
+                pass
+        log.info("Report sent to Telegram.")
+    except urllib.error.HTTPError as e:
+        log.warning("Telegram refused the report (HTTP %s): check `telegram_bot_token` and "
+                    "`telegram_chat_id`, and that you pressed Start in the bot's chat.", e.code)
+    except Exception as e:
+        log.warning("Could not send the report to Telegram (%s).", type(e).__name__)
+
+
 def run_window(cfg, start, end, dry_run=False, factory=None):
     """One session: connect, listen from `start`, send our messages at planned
     moments, then write the report at a random moment after `end`."""
@@ -1156,6 +1203,7 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
                     "=== %s ===\n%s\n\n" % (datetime.now(cfg["tz"]).strftime("%Y-%m-%d %H:%M"), text))
     append_rotating(cfg["report_json_file"], json.dumps(rep, ensure_ascii=False) + "\n")
     print(text, flush=True)
+    send_telegram(cfg, text)
 
 
 def _startup_check(cfg, factory, wake):
