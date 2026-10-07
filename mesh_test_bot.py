@@ -143,23 +143,32 @@ def _load_defaults():
 DEFAULTS = _load_defaults()
 
 
+_rotation_warned = set()
+
+
 def append_rotating(path, text):
     """Append `text` to `path`, first moving the file to path.1 (and path.1 to path.2...,
     dropping the oldest) if it has outgrown MAX_FILE_BYTES, so a bot left running for years
-    cannot fill the disk. Rotation happens between writes, so a line is never split. A
-    failure to rotate is logged and never stops the write itself."""
+    cannot fill the disk. Rotation happens between writes, so a line is never split. The live
+    file is moved aside first: if that fails, nothing older is touched. A failure to rotate is
+    logged (once per file) and never stops the write itself. Meant for one bot per folder."""
     try:
         if os.path.getsize(path) >= MAX_FILE_BYTES:
+            moved = path + ".rotating"
+            os.replace(path, moved)
             for i in range(KEEP_FILES - 1, 0, -1):
                 if os.path.exists("%s.%d" % (path, i)):
                     os.replace("%s.%d" % (path, i), "%s.%d" % (path, i + 1))
-            os.replace(path, path + ".1")
+            os.replace(moved, path + ".1")
     except FileNotFoundError:
-        pass  # first write
+        pass  # the file does not exist yet
     except OSError as e:
-        log.warning("Could not rotate %s: %s", path, e)
+        if path not in _rotation_warned:
+            _rotation_warned.add(path)
+            log.warning("Could not rotate %s: %s", path, e)
     with open(path, "a", encoding="utf-8") as f:
         f.write(text)
+
 
 WEEKDAYS = {name: i for i, names in enumerate([
     ("monday", "mon"), ("tuesday", "tue"), ("wednesday", "wed"), ("thursday", "thu"),

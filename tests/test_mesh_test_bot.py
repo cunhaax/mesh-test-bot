@@ -1650,24 +1650,74 @@ class SessionLimitsTest(unittest.TestCase):
 
 
 class AppendRotatingTest(unittest.TestCase):
-    def test_rotates_and_keeps_only_the_newest_files(self):
-        path = os.path.join(tempfile.mkdtemp(), "rx.log")
-        with mock.patch.object(bot, "MAX_FILE_BYTES", 10), mock.patch.object(bot, "KEEP_FILES", 3):
-            for i in range(8):
-                bot.append_rotating(path, "line-%d\n" % i)  # 7 bytes: each file holds two lines
-        read = lambda p: open(p, encoding="utf-8").read()
-        self.assertEqual(read(path), "line-6\nline-7\n")
-        self.assertEqual(read(path + ".1"), "line-4\nline-5\n")
-        self.assertEqual(read(path + ".2"), "line-2\nline-3\n")
-        self.assertEqual(read(path + ".3"), "line-0\nline-1\n")
-        self.assertFalse(os.path.exists(path + ".4"))  # KEEP_FILES old ones, no more
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "rx.log")
+        bot._rotation_warned.clear()
+
+    def read(self, suffix=""):
+        return open(self.path + suffix, encoding="utf-8").read()
+
+    def fill(self, lines, max_bytes=10, keep=3):
+        with mock.patch.object(bot, "MAX_FILE_BYTES", max_bytes), mock.patch.object(bot, "KEEP_FILES", keep):
+            for i in range(lines):
+                bot.append_rotating(self.path, "line-%d\n" % i)  # 7 bytes: each file holds two lines
+
+    def test_rotates_and_drops_the_oldest(self):
+        self.fill(10)  # a 4th rotation: line-0 and line-1 fall off the end
+        self.assertEqual(self.read(), "line-8\nline-9\n")
+        self.assertEqual(self.read(".1"), "line-6\nline-7\n")
+        self.assertEqual(self.read(".2"), "line-4\nline-5\n")
+        self.assertEqual(self.read(".3"), "line-2\nline-3\n")
+        self.assertFalse(os.path.exists(self.path + ".4"))
+        self.assertFalse(os.path.exists(self.path + ".rotating"))
+
+    def test_keeping_a_single_old_file(self):
+        self.fill(6, keep=1)
+        self.assertEqual((self.read(), self.read(".1")), ("line-4\nline-5\n", "line-2\nline-3\n"))
+        self.assertFalse(os.path.exists(self.path + ".2"))
+
+    def test_the_limit_itself_rotates_and_one_byte_under_does_not(self):
+        with mock.patch.object(bot, "MAX_FILE_BYTES", 7):
+            bot.append_rotating(self.path, "123456\n")  # 7 bytes: at the limit
+            bot.append_rotating(self.path, "next\n")
+        self.assertEqual((self.read(), self.read(".1")), ("next\n", "123456\n"))
+        self.setUp()
+        with mock.patch.object(bot, "MAX_FILE_BYTES", 8):
+            bot.append_rotating(self.path, "123456\n")
+            bot.append_rotating(self.path, "next\n")
+        self.assertEqual(self.read(), "123456\nnext\n")
+        self.assertFalse(os.path.exists(self.path + ".1"))
+
+    def test_a_gap_in_the_old_files_is_tolerated(self):
+        self.fill(4)  # .1 now exists
+        os.rename(self.path + ".1", self.path + ".3")
+        self.fill(2)  # rotates again with .2 missing
+        self.assertTrue(os.path.exists(self.path + ".1"))
 
     def test_small_file_is_only_appended_to(self):
-        path = os.path.join(tempfile.mkdtemp(), "report.txt")
-        bot.append_rotating(path, "a\n")
-        bot.append_rotating(path, "b\n")
-        self.assertEqual(open(path, encoding="utf-8").read(), "a\nb\n")
-        self.assertFalse(os.path.exists(path + ".1"))
+        bot.append_rotating(self.path, "a\n")
+        bot.append_rotating(self.path, "b\n")
+        self.assertEqual(self.read(), "a\nb\n")
+        self.assertFalse(os.path.exists(self.path + ".1"))
+
+    def test_a_failed_rotation_still_writes_leaves_old_files_alone_and_warns_once(self):
+        self.fill(4)
+        old = self.read(".1")
+        with mock.patch.object(bot, "MAX_FILE_BYTES", 10), \
+                mock.patch.object(bot.os, "replace", side_effect=PermissionError("locked")), \
+                self.assertLogs("bot", "WARNING") as logs:
+            bot.append_rotating(self.path, "x\n")
+            bot.append_rotating(self.path, "y\n")
+        self.assertEqual(len(logs.records), 1)  # not once per write
+        self.assertTrue(self.read().endswith("x\ny\n"))
+        self.assertEqual(self.read(".1"), old)
+
+    def test_recording_a_reading_rotates_rx_log(self):
+        cfg = make_cfg()
+        with mock.patch.object(bot, "MAX_FILE_BYTES", 1):
+            for _ in range(2):
+                bot.Heard(cfg, None)._record(1, "A", 0, False, None, None, "", "t")
+        self.assertTrue(os.path.exists(cfg["rx_file"] + ".1"))
 
 
 if __name__ == "__main__":

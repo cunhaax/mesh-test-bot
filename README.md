@@ -143,7 +143,7 @@ Numeric values go in quotes, so YAML keeps them as text.
 
 Run `docker compose pull && docker compose up -d` to get the newest image. Then read
 [Upgrading](docs/upgrading.md): it says what else to check after an update (a release can
-change the compose file, which never updates by itself), and lists what changed per version.
+change the compose file, which never updates by itself), and points to the release notes for what changed in each version.
 
 ## Installing without Docker
 
