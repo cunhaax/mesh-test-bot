@@ -358,11 +358,10 @@ class InstalledFilesTest(unittest.TestCase):
                "intervalo fixo", "Random-schedule limits")
 
     def test_no_shipped_file_mentions_the_removed_fixed_spacing(self):  # [AC-session-limits-8]
-        # docs/upgrading.md names the removed options on purpose (it is the upgrade note), so it is exempt
         files = [os.path.join(ROOT, "README.md"), os.path.join(ROOT, "defaults.ini"),
                  os.path.join(ROOT, "docs", "index.html"), os.path.join(ROOT, "docs", "pt", "index.html")]
         files += [os.path.join(ROOT, "docs", f) for f in os.listdir(os.path.join(ROOT, "docs"))
-                  if f.endswith(".md") and f != "upgrading.md"]
+                  if f.endswith(".md")]
         files += [os.path.join(INSTALL, f) for f in os.listdir(INSTALL)]
         for path in files:
             text = read(path).lower()
@@ -435,6 +434,15 @@ class InstalledFilesTest(unittest.TestCase):
                   if (m := re.match(r"(MTBOT_\w+)=", line))}
         self.assertEqual(active, {"MTBOT_HOST", "MTBOT_CHANNEL", "MTBOT_CHANNEL_NAME", "MTBOT_PLACE",
                                   "MTBOT_KEYWORD", "MTBOT_REPORT_PREFIX"})
+
+    def test_every_compose_service_caps_its_docker_log(self):
+        import yaml
+        for path in [os.path.join(ROOT, "compose.yaml")] + [
+                os.path.join(INSTALL, f) for f in os.listdir(INSTALL) if f.endswith(".yml")]:
+            for name, svc in yaml.safe_load(read(path))["services"].items():
+                with self.subTest(file=os.path.basename(path), service=name):
+                    options = svc.get("logging", {}).get("options", {})
+                    self.assertTrue(options.get("max-size") and options.get("max-file"))
 
     def test_the_end_user_compose_file(self):
         import yaml

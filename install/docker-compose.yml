@@ -15,6 +15,12 @@ services:
     image: ghcr.io/cunhaax/mesh-test-bot:latest
     container_name: mesh-test-bot
     restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file: .env
     volumes:
       - ./data:/data

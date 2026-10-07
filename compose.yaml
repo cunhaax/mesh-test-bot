@@ -5,6 +5,12 @@ services:
     build: .
     container_name: mesh-test-bot
     restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Instead of a data/bot.ini, you can put the options here (MTBOT_<NAME>, see README):
     # environment:
     #   MTBOT_HOST: "192.168.1.50"

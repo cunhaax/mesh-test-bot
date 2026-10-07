@@ -76,6 +76,14 @@ machines, and the object that can later go to a server). Excerpt:
 original text — including text **ignored** on the channel (marked `ignored`), so you
 can see which formats are being left out.
 
+Nothing grows forever: when `rx.log`, `report.txt` or `report.jsonl` passes 10 MB, it is
+renamed to `.1` (`rx.log.1`, and so on, the older ones shifting up) and a new file
+starts; the 5 newest old files are kept and anything older is deleted. That is years of
+reports, and months of `rx.log` even on a busy channel (it also keeps the chat it ignores).
+Copy a file elsewhere before it ages out if you want to keep it forever. Use one data
+folder per bot. The Docker console output is capped separately, at
+3 × 10 MB, by the `logging:` option in the compose files.
+
 ## Random cadence
 
 If many people use the bot, everyone transmitting at the exact same time would be

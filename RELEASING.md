@@ -26,6 +26,16 @@ an empty link to the full history (found the hard way, cutting `v0.1.0`). The PR
 becomes the squash commit's message and the release notes' bullet, so write it as
 something a user of the bot would understand, not "wip" or "fix".
 
+## Changes users have to apply by hand
+
+The compose file is copied once by the installer and never updated afterwards, so a change to
+`install/*.yml` only reaches existing installs if the user applies it. Whoever changes those
+files says so in the PR, and the release notes get a "Changes to your compose file" section
+(marked *required* or *recommended*, with the snippet to add), because that is what users read
+when they upgrade. `docs/upgrading.md` stays generic and is not edited per release.
+Prefer keeping behavior in the image and `defaults.ini`, which `docker compose pull` updates by
+itself; a new option with a default needs no action from anyone.
+
 ## Cutting one
 
 ```sh

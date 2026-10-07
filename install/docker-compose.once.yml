@@ -17,6 +17,12 @@ services:
     # Not unless-stopped: that policy restarts the container after every exit (even a
     # clean one), which would turn a single test run into a repeating loop.
     restart: "no"
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["--now"]  # the session follows MTBOT_LISTEN_MINUTES and the limits in .env
     env_file: .env
     volumes:

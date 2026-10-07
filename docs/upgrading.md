@@ -1,24 +1,41 @@
-# Upgrading from an older version
+# Upgrading
 
-Read this before you update an install from before v0.3.0. The [README](../README.md) links here.
-
-**First, get the new image.** Compose only uses the image it already has, so an older
-install keeps running the old version until you pull:
+## Every upgrade
 
 ```sh
 docker compose pull && docker compose up -d
 ```
 
-Before the session limits, scheduled installs could use shorter sessions, a `random_schedule`
-setting and `--fixed-schedule`. Now:
+Compose only uses the image it already has, so an install keeps running the old version
+until you pull. `up -d` then recreates the container with the new image; your `data/`
+folder is not touched. Afterwards, read the release notes (GitHub, Releases) of the versions you skipped, looking for a
+"Changes to your compose file" section: that is the only thing you may have to apply by hand.
 
-- A session with `listen_minutes` below 30, `report_window_minutes` below 10 or
-  `message_count` above 10 refuses to start. Under Docker, that shows up as a container that
-  keeps restarting: `docker compose logs` says which limit it is. Raise the values in
-  `data/bot.ini` (or `.env`), or, on a private channel only, set the compose `command:` to
-  `["--schedule", "--unsafe-limits"]` (keep `--schedule`: a bare flag would replace it).
-- `random_schedule` and `interval_minutes` no longer exist; the bot warns about them and
-  ignores them. Messages always go out at random moments.
-- On-demand runs in `docker-compose.yml` (`command: ["--now", "--fixed-schedule"]`) and
-  `docker compose run --rm bot --now --fixed-schedule` must drop `--fixed-schedule`, and
-  `--interval` is gone too. The bot refuses both and says so.
+## What updates by itself, and what does not
+
+| | Updates with `pull`? | What to do |
+|---|---|---|
+| The bot's code and its defaults (`defaults.ini`) | Yes | Nothing. |
+| **New options** | Yes, they ship with a default | Nothing: your `.env` and `data/bot.ini` keep working. To change one, add it to `.env` as `MTBOT_<NAME>` (the names are in `env.example` and `defaults.ini`). |
+| **Your `docker-compose.yml`** | **No** | The installer copied it once and never touches it again. If a release changes the template, apply the change by hand (below). |
+| Your `.env` | No | Only if a release says a setting was renamed or removed. |
+
+## When a release changes the compose file
+
+Don't overwrite your file: you may have edited the image tag, ports, `command:`, or added
+more services. Compare it with the current template and copy over only what is new:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/docker-compose.yml \
+  | diff - docker-compose.yml
+```
+
+(Use `with-meshmonitor.yml` or `docker-compose.once.yml` instead if that is the one you
+installed.) With several bots in one file, make the same change in each bot service.
+Then run `docker compose up -d`: it recreates only the services whose configuration changed.
+
+## Breaking changes
+
+Anything a release asks you to change by hand (a renamed or removed setting, a compose
+file change) is listed in that release's notes: see
+[Releases](https://github.com/cunhaax/mesh-test-bot/releases) on GitHub.
