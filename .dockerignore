@@ -1,5 +1,6 @@
 .git
 data
+.env
 *.ini
 !defaults.ini
 *.log

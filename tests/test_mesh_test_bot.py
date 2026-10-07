@@ -1332,6 +1332,73 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(iface.closed)
 
 
+class TelegramTest(unittest.TestCase):
+    """The optional Telegram copy of the report. It must never break a session."""
+
+    def cfg(self, **kw):
+        return make_cfg(telegram_bot_token="123:SECRET", telegram_chat_id="42", **kw)
+
+    def sent_to(self, urlopen):
+        """(url, form fields) of every call made to the patched urlopen."""
+        from urllib.parse import parse_qs
+        return [(c.args[0].full_url, {k: v[0] for k, v in parse_qs(c.args[0].data.decode()).items()})
+                for c in urlopen.call_args_list]
+
+    def test_does_nothing_without_a_token_or_chat(self):
+        for kw in ({}, {"telegram_bot_token": "123:S"}, {"telegram_chat_id": "42"},
+                   {"telegram_bot_token": "", "telegram_chat_id": ""}):
+            with mock.patch.object(bot.urllib.request, "urlopen") as urlopen:
+                bot.send_telegram(make_cfg(**kw), "report")
+            urlopen.assert_not_called()
+
+    def test_sends_the_text_to_the_chat(self):
+        with mock.patch.object(bot.urllib.request, "urlopen") as urlopen:
+            bot.send_telegram(self.cfg(), "ACK | ABCD | 0 | City | RF")
+        self.assertEqual(self.sent_to(urlopen), [
+            ("https://api.telegram.org/bot123:SECRET/sendMessage",
+             {"chat_id": "42", "text": "ACK | ABCD | 0 | City | RF"})])
+
+    def test_a_long_report_is_split_on_line_breaks(self):
+        lines = ["line %03d %s" % (i, "x" * 90) for i in range(100)]  # ~10 KB
+        with mock.patch.object(bot.urllib.request, "urlopen") as urlopen:
+            bot.send_telegram(self.cfg(), "\n".join(lines))
+        texts = [f["text"] for _, f in self.sent_to(urlopen)]
+        self.assertGreater(len(texts), 1)
+        self.assertTrue(all(len(t) <= bot.TELEGRAM_MAX_CHARS for t in texts))
+        self.assertEqual("\n".join(texts).split("\n"), lines)  # nothing lost, no line cut
+
+    def test_one_line_longer_than_the_limit_is_still_cut_to_fit(self):
+        with mock.patch.object(bot.urllib.request, "urlopen") as urlopen:
+            bot.send_telegram(self.cfg(), "y" * (bot.TELEGRAM_MAX_CHARS + 10))
+        texts = [f["text"] for _, f in self.sent_to(urlopen)]
+        self.assertEqual([len(t) for t in texts], [bot.TELEGRAM_MAX_CHARS, 10])
+
+    def test_a_failure_is_logged_without_the_token_and_does_not_raise(self):
+        for err in (OSError("network unreachable"), bot.urllib.error.HTTPError("u", 401, "Unauthorized", {}, None)):
+            with mock.patch.object(bot.urllib.request, "urlopen", side_effect=err), \
+                    self.assertLogs(bot.log, "WARNING") as logs:
+                bot.send_telegram(self.cfg(), "report")  # must not raise
+            self.assertNotIn("SECRET", "\n".join(logs.output))
+
+    def test_a_session_still_writes_its_files_when_telegram_fails(self):
+        cfg = self.cfg(message_count=1, min_gap_seconds=0.1, report_window_minutes=0.0, listen_minutes=0.05)
+        start = datetime.now(cfg["tz"])
+        with mock.patch.object(bot.urllib.request, "urlopen", side_effect=OSError("down")), \
+                mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"):
+            bot.run_window(cfg, start, start + timedelta(seconds=2.5), factory=lambda host, port: FakeIface())
+        self.assertIn("Reporter:", open(cfg["report_file"], encoding="utf-8").read())
+        self.assertEqual(len(open(cfg["report_json_file"], encoding="utf-8").read().splitlines()), 1)
+
+    def test_a_session_sends_the_text_report(self):
+        cfg = self.cfg(message_count=1, min_gap_seconds=0.1, report_window_minutes=0.0, listen_minutes=0.05)
+        start = datetime.now(cfg["tz"])
+        with mock.patch.object(bot.urllib.request, "urlopen") as urlopen, \
+                mock.patch.object(bot, "_preset_name", preset_name), mock.patch.object(bot, "_region_name", lambda n: "EU_868"):
+            bot.run_window(cfg, start, start + timedelta(seconds=2.5), factory=lambda host, port: FakeIface())
+        (url, fields), = self.sent_to(urlopen)
+        self.assertIn("Reporter:", fields["text"])
+
+
 class _StopSchedule(BaseException):
     """Raised by a patched run_window to stop schedule()'s infinite loop after a set number
     of sessions, without being caught by schedule()'s own except SystemExit/except Exception

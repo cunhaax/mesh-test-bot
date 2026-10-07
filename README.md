@@ -208,6 +208,12 @@ two with no default. Each option can come from four places, in this order of pri
   mode shown in the report, `mode`.
 - **Report:** `report_prefix`, the prefix repeated on every line of `report.txt`
   (unrelated to `keyword` above).
+- **Telegram (optional):** set `telegram_bot_token` and `telegram_chat_id` in `bot.ini`
+  (or as `MTBOT_TELEGRAM_BOT_TOKEN` / `MTBOT_TELEGRAM_CHAT_ID`) and each session's text
+  report is also sent there. Create the bot with @BotFather and press Start in its chat
+  first; the chat id is yours, a group's or a channel's where the bot is an admin. A
+  failed send is only logged, the files are still written. Long reports are split into
+  several messages.
 - **Testing without disturbing the network:** point `channel`/`channel_name` at a
   private channel and use `--now --unsafe-limits` for a short run. `--dry-run` shows the
   schedule without connecting to the radio.
