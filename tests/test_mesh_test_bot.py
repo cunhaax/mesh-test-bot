@@ -1649,5 +1649,26 @@ class SessionLimitsTest(unittest.TestCase):
         self.assertEqual(self.load("min_gap_seconds = 1\n")["min_gap_seconds"], 120.0)
 
 
+class AppendRotatingTest(unittest.TestCase):
+    def test_rotates_and_keeps_only_the_newest_files(self):
+        path = os.path.join(tempfile.mkdtemp(), "rx.log")
+        with mock.patch.object(bot, "MAX_FILE_BYTES", 10), mock.patch.object(bot, "KEEP_FILES", 3):
+            for i in range(8):
+                bot.append_rotating(path, "line-%d\n" % i)  # 7 bytes: each file holds two lines
+        read = lambda p: open(p, encoding="utf-8").read()
+        self.assertEqual(read(path), "line-6\nline-7\n")
+        self.assertEqual(read(path + ".1"), "line-4\nline-5\n")
+        self.assertEqual(read(path + ".2"), "line-2\nline-3\n")
+        self.assertEqual(read(path + ".3"), "line-0\nline-1\n")
+        self.assertFalse(os.path.exists(path + ".4"))  # KEEP_FILES old ones, no more
+
+    def test_small_file_is_only_appended_to(self):
+        path = os.path.join(tempfile.mkdtemp(), "report.txt")
+        bot.append_rotating(path, "a\n")
+        bot.append_rotating(path, "b\n")
+        self.assertEqual(open(path, encoding="utf-8").read(), "a\nb\n")
+        self.assertFalse(os.path.exists(path + ".1"))
+
+
 if __name__ == "__main__":
     unittest.main()

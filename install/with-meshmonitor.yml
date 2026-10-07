@@ -18,6 +18,12 @@ services:
     image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1
     container_name: meshmonitor
     restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file: .env
     ports:
       # The web UI, on every network interface of this machine (your LAN included). Change the
@@ -32,6 +38,12 @@ services:
     image: ghcr.io/cunhaax/mesh-test-bot:latest
     container_name: mesh-test-bot
     restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - meshmonitor
     env_file: .env

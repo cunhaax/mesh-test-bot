@@ -141,9 +141,9 @@ Numeric values go in quotes, so YAML keeps them as text.
 
 ## Upgrading
 
-Run `docker compose pull && docker compose up -d` first, so you get the newest
-image. Then read [Upgrading from an older version](docs/upgrading.md): some settings and
-schedules from before v0.3.0 are now refused or ignored.
+Run `docker compose pull && docker compose up -d` to get the newest image. Then read
+[Upgrading](docs/upgrading.md): it says what else to check after an update (a release can
+change the compose file, which never updates by itself), and lists what changed per version.
 
 ## Installing without Docker
 

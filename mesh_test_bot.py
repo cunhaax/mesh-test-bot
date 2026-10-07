@@ -96,6 +96,8 @@ LEGACY_SETTINGS = ("random_schedule", "interval_minutes")  # no longer exist; ig
 MIN_GAP_SECONDS = 120.0  # never two of our own messages closer than this
 SESSION_TOLERANCE_SECONDS = 60.0  # how long before the session started still counts (see Heard)
 WAKE_BEFORE_MINUTES = 2.0  # --schedule: connect this early to check the radio
+MAX_FILE_BYTES = 10 * 1024 * 1024  # rx.log and the report files rotate past this size...
+KEEP_FILES = 5  # ...keeping this many old ones (rx.log.1 is the newest): at most ~60 MB per file
 STARTUP_CHECK_SECONDS = 60.0  # --schedule: timeout of each startup connectivity probe attempt
 # --schedule: give up retrying the startup probe after this many minutes and exit; also the
 # threshold under which the probe is skipped entirely, since the session's own connection
@@ -139,6 +141,25 @@ def _load_defaults():
 
 
 DEFAULTS = _load_defaults()
+
+
+def append_rotating(path, text):
+    """Append `text` to `path`, first moving the file to path.1 (and path.1 to path.2...,
+    dropping the oldest) if it has outgrown MAX_FILE_BYTES, so a bot left running for years
+    cannot fill the disk. Rotation happens between writes, so a line is never split. A
+    failure to rotate is logged and never stops the write itself."""
+    try:
+        if os.path.getsize(path) >= MAX_FILE_BYTES:
+            for i in range(KEEP_FILES - 1, 0, -1):
+                if os.path.exists("%s.%d" % (path, i)):
+                    os.replace("%s.%d" % (path, i), "%s.%d" % (path, i + 1))
+            os.replace(path, path + ".1")
+    except FileNotFoundError:
+        pass  # first write
+    except OSError as e:
+        log.warning("Could not rotate %s: %s", path, e)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text)
 
 WEEKDAYS = {name: i for i, names in enumerate([
     ("monday", "mon"), ("tuesday", "tue"), ("wednesday", "wed"), ("thursday", "thu"),
@@ -529,8 +550,8 @@ class Heard:
                  "%d/%s" % (seq, total if total else "?") if seq else "n/a", hops, snr, rssi, parsed.place)
 
     def _record(self, num, name, hops, via_mqtt, snr, rssi, note, text):
-        with self.lock, open(self.cfg["rx_file"], "a", encoding="utf-8") as f:
-            f.write("%s\t!%08x\t%s\thops=%s\tmqtt=%d\tsnr=%s\trssi=%s\t%s\t%s\n" % (
+        with self.lock:
+            append_rotating(self.cfg["rx_file"], "%s\t!%08x\t%s\thops=%s\tmqtt=%d\tsnr=%s\trssi=%s\t%s\t%s\n" % (
                 datetime.now().isoformat(timespec="seconds"), num, name, hops, via_mqtt,
                 snr, rssi, note, text))
 
@@ -1122,10 +1143,9 @@ def run_window(cfg, start, end, dry_run=False, factory=None):
 
     rep = build_report(cfg, radio, heard, start, end, report_at, sent)
     text = render_text(rep, cfg["report_prefix"])
-    with open(cfg["report_file"], "a", encoding="utf-8") as f:
-        f.write("=== %s ===\n%s\n\n" % (datetime.now(cfg["tz"]).strftime("%Y-%m-%d %H:%M"), text))
-    with open(cfg["report_json_file"], "a", encoding="utf-8") as f:
-        f.write(json.dumps(rep, ensure_ascii=False) + "\n")
+    append_rotating(cfg["report_file"],
+                    "=== %s ===\n%s\n\n" % (datetime.now(cfg["tz"]).strftime("%Y-%m-%d %H:%M"), text))
+    append_rotating(cfg["report_json_file"], json.dumps(rep, ensure_ascii=False) + "\n")
     print(text, flush=True)
 
 

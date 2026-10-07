@@ -32,11 +32,19 @@ mesh-test-bot/
 `docker-compose.yml`:
 
 ```yaml
+# One copy of the Docker log cap, reused by every service below.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   meshmonitor:
     image: ghcr.io/yeraze/meshmonitor:latest
     container_name: meshmonitor
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     ports:
       - "127.0.0.1:8080:3001"
@@ -47,6 +55,7 @@ services:
     image: ghcr.io/cunhaax/mesh-test-bot:latest
     container_name: mesh-test-bot
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - meshmonitor
     env_file: .env
@@ -57,6 +66,7 @@ services:
     image: ghcr.io/cunhaax/mesh-test-bot:latest
     container_name: mesh-test-bot-2
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - meshmonitor
     env_file: .env.bot2
