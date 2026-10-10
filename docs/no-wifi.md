@@ -10,10 +10,11 @@ TCP port. Then you point `host`/`port` (`MTBOT_HOST`/`MTBOT_PORT`) at the bridge
 radio ⇄ USB cable ⇄ bridge (:4403) ⇄ bot   (or MeshMonitor, which the bot can then use)
 ```
 
-The bridge only copies bytes; the Meshtastic stream is the same over serial and TCP.
-It is the same single-client rule as always: **one program at a time** talks to the
-radio, so if MeshMonitor is in the path, the bridge goes to MeshMonitor and the bot
-connects to its Virtual Node.
+A **USB** bridge only copies bytes (serial and TCP use the same framing). A **Bluetooth**
+bridge also has to translate between BLE's raw protobuf and TCP's framed protocol, so it
+needs a purpose-built program (below). Either way it is the same single-client rule as
+always: **one program at a time** talks to the radio, so if MeshMonitor is in the path,
+the bridge goes to MeshMonitor and the bot connects to its Virtual Node.
 
 **USB is the recommended way**: it is more reliable than Bluetooth, and it powers the
 radio. If the bridge is on another machine, use that machine's address as the host.
@@ -58,17 +59,57 @@ From inside a container, the Mac is `host.docker.internal`, so use
 
 ## Bluetooth (BLE)
 
-Possible, but a worse choice:
+Less reliable than a cable: range is about 10 to 30 m, 2.4 GHz interference causes
+disconnects, and a RAK4631 accepts **one BLE client at a time**, so the phone app cannot
+use Bluetooth while the bridge holds it. If you can use USB, do.
 
-- A RAK4631 accepts **one BLE client at a time**, so the phone app is locked out while
-  the bridge is connected.
-- Pairing and reconnecting are flakier than a cable.
-- It needs a BLE-to-TCP bridge (the `meshtastic` Python CLI can do BLE with `--ble`;
-  look for a bridge that serves the TCP protocol). On Linux a container needs the host's
-  BlueZ (`network_mode: host`, `/var/run/dbus` mounted); on macOS it has to run natively,
-  for the same reason as above.
+[MeshMonitor's BLE bridge](https://meshmonitor.org/configuration/ble-bridge.html)
+(`ghcr.io/yeraze/meshtastic-ble-bridge`) connects to the radio over BLE and serves TCP on
+:4403. **The suggested setup is bridge + MeshMonitor + its Virtual Node**, because it
+solves both single-client limits (the radio's BLE slot is held by the bridge, the bridge's
+TCP slot by MeshMonitor, and the bot, the web UI and the app can all use the Virtual Node):
 
-I have not tested a specific BLE bridge with this bot.
+```
+radio ⇄ BLE ⇄ ble-bridge (:4403) ⇄ MeshMonitor ⇄ Virtual Node (:4404) ⇄ bot
+```
+
+It needs a **Linux host** with BlueZ and D-Bus (on macOS, Docker cannot reach Bluetooth;
+use USB). Steps:
+
+1. **Pair the radio on the host**, once:
+   ```sh
+   bluetoothctl
+   scan on                   # wait for Meshtastic_XXXX, note its address
+   pair AA:BB:CC:DD:EE:FF
+   trust AA:BB:CC:DD:EE:FF
+   exit
+   ```
+   (The address also shows with
+   `docker run --rm --privileged -v /var/run/dbus:/var/run/dbus ghcr.io/yeraze/meshtastic-ble-bridge:latest --scan`.)
+2. Follow the [MeshMonitor guide](meshmonitor.md) with the `with-meshmonitor.yml` and
+   `meshmonitor.env.example` files, and add two lines to the `.env`:
+   ```
+   BLE_ADDRESS=AA:BB:CC:DD:EE:FF
+   MESHTASTIC_NODE_IP=ble-bridge
+   ```
+3. Start everything with the [`ble-bridge.yml`](../install/ble-bridge.yml) overlay, then
+   enable the Virtual Node as the guide says:
+   ```sh
+   docker compose -f with-meshmonitor.yml -f ble-bridge.yml up -d
+   docker compose -f with-meshmonitor.yml -f ble-bridge.yml logs ble-bridge
+   ```
+   The bridge log should say it connected to the BLE device and that the TCP server is
+   listening on :4403.
+
+Notes: the bridge runs `privileged` and its TCP port has no authentication or
+encryption, so do not publish 4403 (the overlay does not). The bridge can also run on a
+different Linux machine (`network_mode: host`); then set `MESHTASTIC_NODE_IP` to that
+machine's address. Without MeshMonitor you can point the bot straight at the bridge
+(`MTBOT_HOST` = its address), but then nothing else can use the radio.
+
+**Not tested with this bot or a real RAK4631**: it follows MeshMonitor's documentation,
+and the bot sees the Virtual Node like any other radio, but nobody has run this
+combination yet.
 
 ## Checking it works
 
