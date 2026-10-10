@@ -165,6 +165,12 @@ radio is unreachable at startup, the bot retries for a few minutes and then **ex
 the scheduler is simply gone until someone notices. The Docker Compose setup already has
 this covered (`restart: unless-stopped`).
 
+## Radios without WiFi (RAK4631, T-Echo, …)
+
+The bot talks to the radio over TCP, so the radio needs an IP address. A radio that only
+has USB and/or Bluetooth needs a small bridge that exposes it on a TCP port: see
+[Radios without WiFi](docs/no-wifi.md) for the recipes (Linux, Raspberry Pi, macOS).
+
 ## With MeshMonitor (optional)
 
 If you want the full message history in a web UI, or need more than one program to

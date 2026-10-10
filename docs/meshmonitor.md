@@ -26,6 +26,10 @@ The bot receives the **same stream** as MeshMonitor: opening or reading messages
 the UI does not take them away from it (the UI reads from its own database, without
 opening any connection to the radio).
 
+If your radio has no WiFi (e.g. RAK4631), MeshMonitor needs the same kind of bridge
+the bot does: see [Radios without WiFi](no-wifi.md), and use the bridge's address as the
+radio's IP.
+
 ## Installation
 
 **With the installer**: run `install.sh` (see the README's Quick Install) and answer
