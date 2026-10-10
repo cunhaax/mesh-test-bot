@@ -16,28 +16,39 @@ needs a purpose-built program (below). Either way it is the same single-client r
 always: **one program at a time** talks to the radio, so if MeshMonitor is in the path,
 the bridge goes to MeshMonitor and the bot connects to its Virtual Node.
 
-## The easiest way: MeshMonitor with its bridge, then the installer's "existing" mode
+## Two ways to set it up
 
-MeshMonitor has a ready-made bridge for each case, and documents the whole setup
-(overlay file, device mapping, pairing):
+MeshMonitor has a ready-made bridge for each case ([Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
+for USB, [BLE Bridge](https://meshmonitor.org/configuration/ble-bridge.html) for
+Bluetooth). Both ways below use them, with MeshMonitor and its Virtual Node in between.
 
-- USB: [Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
-- Bluetooth: [BLE Bridge](https://meshmonitor.org/configuration/ble-bridge.html)
+### A. Starting from nothing: the installer plus a bridge overlay
 
-So, if you have MeshMonitor, or are willing to install it:
+1. Run the installer ([README](../README.md#with-the-installer-linux-macos-raspberry-pi)),
+   answer **set up a new MeshMonitor here**, and when it asks for the radio's IP type
+   `serial-bridge` (USB) or `ble-bridge` (Bluetooth). That is the bridge's name inside
+   Docker, which the next steps create.
+2. In the `mesh-test-bot/` folder it made, download the overlay and tell Compose to use
+   it, so the commands the installer printed keep working as they are (shown for USB;
+   use `ble-bridge.yml` for Bluetooth):
+   ```sh
+   curl -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/serial-bridge.yml
+   echo "COMPOSE_FILE=docker-compose.yml:serial-bridge.yml" >> .env
+   echo "SERIAL_DEVICE='/dev/ttyACM0'" >> .env      # Bluetooth: BLE_ADDRESS='AA:BB:CC:DD:EE:FF'
+   ```
+3. Continue with the commands the installer printed (`docker compose pull`,
+   `docker compose up -d`) and enable the Virtual Node as it says. Bluetooth needs the
+   radio paired on the host first (see below).
 
-1. Set up MeshMonitor with the bridge for your radio, following its pages above, and
-   enable the **Virtual Node** on the radio's source (see the [MeshMonitor guide](meshmonitor.md)).
-2. Run this bot's installer and answer **existing** when it asks how to connect. Give it
-   the Virtual Node's address and port (4404).
-3. The bot must be able to reach that address. The Virtual Node has no authentication, so
-   MeshMonitor's own compose files do not publish 4404. Either publish it
-   (`4404:4404` on the MeshMonitor service) and restrict who can reach it with a firewall
-   rule, or, if both run on the same machine, put the bot on MeshMonitor's Docker network
-   and use the service name.
+### B. You already run MeshMonitor
 
-If you are starting from nothing, the overlays below do the same thing in one
-`docker compose` command. The rest of this page explains each piece.
+1. Set up MeshMonitor with the bridge, following its own page above, and enable the
+   **Virtual Node** on the radio's source (see the [MeshMonitor guide](meshmonitor.md)).
+2. Run the installer and answer **existing**; give it the Virtual Node's address and port (4404).
+3. The bot must be able to reach that address, and the Virtual Node has no
+   authentication, so MeshMonitor's own compose files do not publish 4404. Publish it
+   (`4404:4404` on the MeshMonitor service), use the MeshMonitor machine's LAN address as
+   the host, and restrict who can reach port 4404 with a firewall rule.
 
 **USB is the recommended way**: it is more reliable than Bluetooth, and it powers the
 radio. If the bridge is on another machine, use that machine's address as the host.
@@ -45,27 +56,27 @@ radio. If the bridge is on another machine, use that machine's address as the ho
 ## Linux or Raspberry Pi, with USB
 
 [MeshMonitor's Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
-(`ghcr.io/yeraze/meshtastic-serial-bridge`) is a container around `socat`. It also turns
-off the serial line's hang-up behaviour (HUPCL), which otherwise can make the radio reboot
-when the port is opened, and it reconnects by itself. Find the device (usually
-`/dev/ttyACM0`; `ls /dev/ttyACM* /dev/ttyUSB*` before and after plugging the radio in), then:
+(`ghcr.io/yeraze/meshtastic-serial-bridge`) is a container around `socat`. According to
+its page it also turns off the serial line's hang-up behaviour (HUPCL), which otherwise
+can make the radio reboot when the port is opened, and it reconnects by itself (I have
+not checked either, nor what happens after unplugging and replugging the cable). Find the
+device with `ls /dev/serial/by-id/` (the stable name; `/dev/ttyACM0` can change) before
+and after plugging the radio in, then:
 
 - **With MeshMonitor** (recommended: it keeps the single connection and offers a Virtual
-  Node to the bot, see [the MeshMonitor guide](meshmonitor.md)): add to the `.env`
-  ```
-  SERIAL_DEVICE=/dev/ttyACM0
-  MESHTASTIC_NODE_IP=serial-bridge
-  ```
-  and start with the [`serial-bridge.yml`](../install/serial-bridge.yml) overlay:
-  ```sh
-  docker compose -f with-meshmonitor.yml -f serial-bridge.yml up -d
-  ```
+  Node to the bot): way A above, with `SERIAL_DEVICE` set to that device. On a desktop
+  Linux, ModemManager may grab `ttyACM*` devices; stop it if the bridge cannot open the port.
 - **Bot only**: add the bridge to the bot's compose file and set `MTBOT_HOST=serial-bridge`
   (nothing else can use the radio then):
   ```yaml
     serial-bridge:
       image: ghcr.io/yeraze/meshtastic-serial-bridge:latest
       restart: unless-stopped
+      logging:
+        driver: json-file
+        options:
+          max-size: "10m"
+          max-file: "3"
       devices:
         - /dev/ttyACM0:/dev/ttyACM0
       environment:
@@ -73,11 +84,12 @@ when the port is opened, and it reconnects by itself. Find the device (usually
         - BAUD_RATE=115200
         - TCP_PORT=4403
   ```
-- **Without Docker**: `socat TCP-LISTEN:4403,fork,reuseaddr /dev/ttyACM0,raw,b115200,hupcl=0`
+- **Without Docker**, bot on the same machine:
+  `socat TCP-LISTEN:4403,bind=127.0.0.1,fork,reuseaddr /dev/ttyACM0,raw,b115200,hupcl=0`
+  (your user needs to be in the `dialout` group to open the device).
 
 Notes:
-- If the container cannot open the device, your user may need to be in the `dialout`
-  group. Close the Meshtastic app/CLI on that USB port first: it cannot be shared.
+- Close the Meshtastic app/CLI on that USB port first: it cannot be shared.
 - MeshMonitor's page says to prepare the radio first with
   `meshtastic --set serial.enabled true`, `--set serial.echo false`,
   `--set serial.mode SIMPLE` and `--set serial.baud BAUD_115200`. I could not confirm
@@ -93,12 +105,16 @@ has to run **on the Mac itself**, not in a container:
 ```sh
 brew install socat
 ls /dev/cu.usbmodem*          # the radio's port
-socat TCP-LISTEN:4403,fork,reuseaddr /dev/cu.usbmodemXXXX,raw,b115200,hupcl=0
+socat TCP-LISTEN:4403,bind=127.0.0.1,fork,reuseaddr /dev/cu.usbmodemXXXX,raw,b115200,hupcl=0
 ```
 
 From inside a container, the Mac is `host.docker.internal`, so use
 `MTBOT_HOST=host.docker.internal` (and `MTBOT_PORT=4403`), or
-`MESHTASTIC_NODE_IP=host.docker.internal` with MeshMonitor.
+`MESHTASTIC_NODE_IP=host.docker.internal` with MeshMonitor. `bind=127.0.0.1` keeps the
+unauthenticated radio off your network; I expect Docker Desktop's
+`host.docker.internal` to reach it, but have not tried. If a container cannot connect,
+bind to the Mac's LAN address instead and block port 4403 from other machines with the
+firewall.
 
 ## Bluetooth (BLE)
 
@@ -122,27 +138,25 @@ use USB). Steps:
 1. **Pair the radio on the host**, once:
    ```sh
    bluetoothctl
+   agent on
+   default-agent
    scan on                   # wait for Meshtastic_XXXX, note its address
-   pair AA:BB:CC:DD:EE:FF
+   pair AA:BB:CC:DD:EE:FF    # asks for the PIN
    trust AA:BB:CC:DD:EE:FF
    exit
    ```
+   The PIN is shown on the radio's screen; a radio without one, like the RAK4631, uses
+   the default `123456` unless you changed it.
    (The address also shows with
    `docker run --rm --privileged -v /var/run/dbus:/var/run/dbus ghcr.io/yeraze/meshtastic-ble-bridge:latest --scan`.)
-2. Follow the [MeshMonitor guide](meshmonitor.md) with the `with-meshmonitor.yml` and
-   `meshmonitor.env.example` files, and add two lines to the `.env`:
-   ```
-   BLE_ADDRESS=AA:BB:CC:DD:EE:FF
-   MESHTASTIC_NODE_IP=ble-bridge
-   ```
-3. Start everything with the [`ble-bridge.yml`](../install/ble-bridge.yml) overlay, then
-   enable the Virtual Node as the guide says:
+2. Follow way A above with `ble-bridge.yml`, setting `BLE_ADDRESS` to that address
+   (or way B, with MeshMonitor's own overlay from its BLE page).
+3. After starting, check the bridge:
    ```sh
-   docker compose -f with-meshmonitor.yml -f ble-bridge.yml up -d
-   docker compose -f with-meshmonitor.yml -f ble-bridge.yml logs ble-bridge
+   docker compose logs ble-bridge
    ```
-   The bridge log should say it connected to the BLE device and that the TCP server is
-   listening on :4403.
+   It should say it connected to the BLE device and that the TCP server is listening on
+   :4403 (the wording is MeshMonitor's, not checked here).
 
 Notes: the bridge runs `privileged` and its TCP port has no authentication or
 encryption, so do not publish 4403 (the overlay does not). The bridge can also run on a

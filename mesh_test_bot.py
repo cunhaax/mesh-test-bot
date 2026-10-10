@@ -1098,8 +1098,8 @@ def check_radio(cfg, factory=None, timeout=None):
                      "`host`/`port` (MTBOT_HOST/MTBOT_PORT in the environment, or bot.ini -- inside Docker "
                      "use the radio's IP, not a .local name) and that the radio is on and reachable from "
                      "this machine. With MeshMonitor: check it is connected to the radio and the Virtual "
-                     "Node is enabled. A radio without WiFi (e.g. RAK4631) has no IP address of its own: it needs a "
-                     "USB/BLE-to-TCP bridge, see docs/no-wifi.md.", host, port, timeout, reason)
+                     "Node is enabled. No WiFi (e.g. RAK4631)? See "
+                     "https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md", host, port, timeout, reason)
             result = False
     finally:
         if radio.connect_in_flight():

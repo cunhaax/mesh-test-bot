@@ -445,6 +445,31 @@ class InstalledFilesTest(unittest.TestCase):
                     options = svc.get("logging", {}).get("options", {})
                     self.assertTrue(options.get("max-size") and options.get("max-file"))
 
+    def test_the_bridge_overlays(self):
+        import yaml
+        for fname, svc_name, device_var in (("serial-bridge.yml", "serial-bridge", "SERIAL_DEVICE"),
+                                            ("ble-bridge.yml", "ble-bridge", "BLE_ADDRESS")):
+            with self.subTest(overlay=fname):
+                services = yaml.safe_load(read(os.path.join(INSTALL, fname)))["services"]
+                self.assertEqual(set(services), {svc_name, "meshmonitor"})
+                self.assertEqual(services["meshmonitor"]["depends_on"], [svc_name])
+                self.assertNotIn("ports", services[svc_name])  # the bridge's TCP port has no authentication
+                self.assertIn(device_var, read(os.path.join(INSTALL, fname)))
+
+    def test_a_bridge_name_is_accepted_as_the_radios_address_in_setup_mode(self):
+        for name in ("serial-bridge", "ble-bridge"):
+            with self.subTest(name=name):
+                p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP=name, MTBOT_CHANNEL="1",
+                                        MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="0")
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(read_env_file(os.path.join(out, ".env"))["MESHTASTIC_NODE_IP"], name)
+
+    def test_the_no_wifi_hint_is_only_shown_when_the_connection_question_is_asked(self):
+        p, out = run_installer(MTB_CONNECTION="direct", MTBOT_HOST="1.2.3.4", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("no-wifi", p.stdout)
+
     def test_the_end_user_compose_file(self):
         import yaml
         svc = yaml.safe_load(read(os.path.join(INSTALL, "docker-compose.yml")))["services"]["bot"]

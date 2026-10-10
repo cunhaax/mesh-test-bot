@@ -1,20 +1,20 @@
-# Overlay for with-meshmonitor.yml: a BLE-to-TCP bridge, for a radio that only has
-# Bluetooth (e.g. RAK4631). It connects to the radio over BLE and serves the Meshtastic
+# Overlay for with-meshmonitor.yml (the installer saves it as docker-compose.yml): a
+# BLE-to-TCP bridge, for a radio that only has Bluetooth (e.g. RAK4631). It connects to the radio over BLE and serves the Meshtastic
 # TCP protocol on :4403 to MeshMonitor, which then offers its Virtual Node to the bot.
 # Full guide: docs/no-wifi.md
 #
 # Needs a LINUX host with BlueZ and D-Bus running (not macOS/Docker Desktop), and the
-# radio paired on the host first (bluetoothctl: pair + trust). In .env set:
+# radio paired on the host first (bluetoothctl: agent on, pair, trust). In .env set:
 #   BLE_ADDRESS=AA:BB:CC:DD:EE:FF     the radio's Bluetooth address
 #   MESHTASTIC_NODE_IP=ble-bridge     MeshMonitor connects to the bridge, not to an IP
 #
-#   docker compose -f with-meshmonitor.yml -f ble-bridge.yml up -d
+#   docker compose -f docker-compose.yml -f ble-bridge.yml up -d
 #
 # Bridge: https://meshmonitor.org/configuration/ble-bridge.html (not tested with this bot).
 services:
   ble-bridge:
     image: ghcr.io/yeraze/meshtastic-ble-bridge:latest
-    container_name: meshmonitor-ble-bridge
+    container_name: meshtastic-ble-bridge
     restart: unless-stopped
     # Full access to the host's hardware, which BLE needs. Do not publish 4403: the
     # bridge's TCP port has no authentication or encryption (MeshMonitor reaches it over
