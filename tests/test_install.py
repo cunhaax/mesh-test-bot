@@ -344,6 +344,7 @@ class PipedInstallerTest(unittest.TestCase):
             "MTBOT_TIMEZONE": "Europe/Lisbon", "MTBOT_LISTEN_MINUTES": "120", "MTBOT_MESSAGE_COUNT": "3",
             "MTBOT_REPORT_WINDOW_MINUTES": "60"})
         self.assertIn("Radio's IP", screen)
+        self.assertIn("docs/no-wifi.md", screen)  # the hint for radios without WiFi
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(

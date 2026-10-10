@@ -16,6 +16,29 @@ needs a purpose-built program (below). Either way it is the same single-client r
 always: **one program at a time** talks to the radio, so if MeshMonitor is in the path,
 the bridge goes to MeshMonitor and the bot connects to its Virtual Node.
 
+## The easiest way: MeshMonitor with its bridge, then the installer's "existing" mode
+
+MeshMonitor has a ready-made bridge for each case, and documents the whole setup
+(overlay file, device mapping, pairing):
+
+- USB: [Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
+- Bluetooth: [BLE Bridge](https://meshmonitor.org/configuration/ble-bridge.html)
+
+So, if you have MeshMonitor, or are willing to install it:
+
+1. Set up MeshMonitor with the bridge for your radio, following its pages above, and
+   enable the **Virtual Node** on the radio's source (see the [MeshMonitor guide](meshmonitor.md)).
+2. Run this bot's installer and answer **existing** when it asks how to connect. Give it
+   the Virtual Node's address and port (4404).
+3. The bot must be able to reach that address. The Virtual Node has no authentication, so
+   MeshMonitor's own compose files do not publish 4404. Either publish it
+   (`4404:4404` on the MeshMonitor service) and restrict who can reach it with a firewall
+   rule, or, if both run on the same machine, put the bot on MeshMonitor's Docker network
+   and use the service name.
+
+If you are starting from nothing, the overlays below do the same thing in one
+`docker compose` command. The rest of this page explains each piece.
+
 **USB is the recommended way**: it is more reliable than Bluetooth, and it powers the
 radio. If the bridge is on another machine, use that machine's address as the host.
 
