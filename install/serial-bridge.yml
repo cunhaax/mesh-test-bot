@@ -1,0 +1,40 @@
+# Overlay for with-meshmonitor.yml: a USB-serial-to-TCP bridge, for a radio that has no
+# WiFi (e.g. RAK4631) but is plugged into this machine. It serves the Meshtastic TCP
+# protocol on :4403 to MeshMonitor, which then offers its Virtual Node to the bot.
+# Full guide: docs/no-wifi.md
+#
+# Needs a LINUX host (Docker Desktop on macOS/Windows cannot pass USB devices to
+# containers). In .env set:
+#   SERIAL_DEVICE=/dev/ttyACM0        the radio's port (ls /dev/ttyACM* /dev/ttyUSB*)
+#   MESHTASTIC_NODE_IP=serial-bridge  MeshMonitor connects to the bridge, not to an IP
+#
+#   docker compose -f with-meshmonitor.yml -f serial-bridge.yml up -d
+#
+# Bridge: https://meshmonitor.org/configuration/serial-bridge.html (not tested with this bot).
+services:
+  serial-bridge:
+    image: ghcr.io/yeraze/meshtastic-serial-bridge:latest
+    container_name: meshtastic-serial-bridge
+    restart: unless-stopped
+    # Do not publish 4403: the bridge's TCP port has no authentication or encryption
+    # (MeshMonitor reaches it over Docker's internal network, by the name "serial-bridge").
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    devices:
+      - ${SERIAL_DEVICE:-/dev/ttyACM0}:${SERIAL_DEVICE:-/dev/ttyACM0}   # same path on both sides
+    environment:
+      - SERIAL_DEVICE=${SERIAL_DEVICE:-/dev/ttyACM0}
+      - BAUD_RATE=115200
+      - TCP_PORT=4403
+
+  meshmonitor:
+    depends_on:
+      - serial-bridge
+    logging:                       # same cap as in with-meshmonitor.yml
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

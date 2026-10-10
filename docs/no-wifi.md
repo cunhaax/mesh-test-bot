@@ -21,27 +21,46 @@ radio. If the bridge is on another machine, use that machine's address as the ho
 
 ## Linux or Raspberry Pi, with USB
 
-Find the device (usually `/dev/ttyACM0`; `ls /dev/ttyACM* /dev/ttyUSB*` before and after
-plugging the radio in), then run the bridge:
+[MeshMonitor's Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
+(`ghcr.io/yeraze/meshtastic-serial-bridge`) is a container around `socat`. It also turns
+off the serial line's hang-up behaviour (HUPCL), which otherwise can make the radio reboot
+when the port is opened, and it reconnects by itself. Find the device (usually
+`/dev/ttyACM0`; `ls /dev/ttyACM* /dev/ttyUSB*` before and after plugging the radio in), then:
 
-```sh
-socat TCP-LISTEN:4403,fork,reuseaddr /dev/ttyACM0,raw,b115200
-```
+- **With MeshMonitor** (recommended: it keeps the single connection and offers a Virtual
+  Node to the bot, see [the MeshMonitor guide](meshmonitor.md)): add to the `.env`
+  ```
+  SERIAL_DEVICE=/dev/ttyACM0
+  MESHTASTIC_NODE_IP=serial-bridge
+  ```
+  and start with the [`serial-bridge.yml`](../install/serial-bridge.yml) overlay:
+  ```sh
+  docker compose -f with-meshmonitor.yml -f serial-bridge.yml up -d
+  ```
+- **Bot only**: add the bridge to the bot's compose file and set `MTBOT_HOST=serial-bridge`
+  (nothing else can use the radio then):
+  ```yaml
+    serial-bridge:
+      image: ghcr.io/yeraze/meshtastic-serial-bridge:latest
+      restart: unless-stopped
+      devices:
+        - /dev/ttyACM0:/dev/ttyACM0
+      environment:
+        - SERIAL_DEVICE=/dev/ttyACM0
+        - BAUD_RATE=115200
+        - TCP_PORT=4403
+  ```
+- **Without Docker**: `socat TCP-LISTEN:4403,fork,reuseaddr /dev/ttyACM0,raw,b115200,hupcl=0`
 
-Or as a container, next to the bot (add it to your compose file, and set
-`MTBOT_HOST=serial-bridge`):
-
-```yaml
-  serial-bridge:
-    image: alpine/socat
-    restart: unless-stopped
-    devices:
-      - /dev/ttyACM0:/dev/ttyACM0
-    command: ["TCP-LISTEN:4403,fork,reuseaddr", "/dev/ttyACM0,raw,b115200"]
-```
-
-Your user may need to be in the `dialout` group to open the device outside Docker.
-Close the Meshtastic app/CLI on that USB port first: it cannot be shared.
+Notes:
+- If the container cannot open the device, your user may need to be in the `dialout`
+  group. Close the Meshtastic app/CLI on that USB port first: it cannot be shared.
+- MeshMonitor's page says to prepare the radio first with
+  `meshtastic --set serial.enabled true`, `--set serial.echo false`,
+  `--set serial.mode SIMPLE` and `--set serial.baud BAUD_115200`. I could not confirm
+  this is needed for a RAK4631's USB port (those settings are for the UART serial module),
+  so try without it first, and apply it if the bridge connects but no data arrives.
+- The bridge's TCP port has no authentication or encryption: do not publish 4403.
 
 ## macOS, with USB
 
@@ -51,11 +70,12 @@ has to run **on the Mac itself**, not in a container:
 ```sh
 brew install socat
 ls /dev/cu.usbmodem*          # the radio's port
-socat TCP-LISTEN:4403,fork,reuseaddr /dev/cu.usbmodemXXXX,raw,b115200
+socat TCP-LISTEN:4403,fork,reuseaddr /dev/cu.usbmodemXXXX,raw,b115200,hupcl=0
 ```
 
 From inside a container, the Mac is `host.docker.internal`, so use
-`MTBOT_HOST=host.docker.internal` (and `MTBOT_PORT=4403`).
+`MTBOT_HOST=host.docker.internal` (and `MTBOT_PORT=4403`), or
+`MESHTASTIC_NODE_IP=host.docker.internal` with MeshMonitor.
 
 ## Bluetooth (BLE)
 
@@ -117,5 +137,5 @@ With the bridge running, `python3 -c "import socket; socket.create_connection(('
 from the bot's machine should return without an error. Then start the bot as usual:
 its startup check says whether the radio answered and the channel is right.
 
-*Not tested end to end with a physical RAK4631; the commands are the standard
-`socat` forms.*
+*Not tested end to end with a physical RAK4631; the USB and Bluetooth setups follow
+MeshMonitor's documentation and standard `socat` usage.*
