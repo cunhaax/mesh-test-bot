@@ -34,8 +34,3 @@ services:
   meshmonitor:
     depends_on:
       - serial-bridge
-    logging:                       # same cap as in with-meshmonitor.yml
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"

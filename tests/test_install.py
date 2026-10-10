@@ -438,10 +438,14 @@ class InstalledFilesTest(unittest.TestCase):
 
     def test_every_compose_service_caps_its_docker_log(self):
         import yaml
+        base = yaml.safe_load(read(os.path.join(INSTALL, "with-meshmonitor.yml")))["services"]
         for path in [os.path.join(ROOT, "compose.yaml")] + [
                 os.path.join(INSTALL, f) for f in os.listdir(INSTALL) if f.endswith(".yml")]:
             for name, svc in yaml.safe_load(read(path))["services"].items():
                 with self.subTest(file=os.path.basename(path), service=name):
+                    # an overlay's stub of a service that with-meshmonitor.yml defines inherits its logging
+                    if path.endswith(("-bridge.yml",)) and name in base:
+                        svc = {**base[name], **svc}
                     options = svc.get("logging", {}).get("options", {})
                     self.assertTrue(options.get("max-size") and options.get("max-file"))
 
@@ -469,6 +473,13 @@ class InstalledFilesTest(unittest.TestCase):
                                 MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn("no-wifi", p.stdout)
+
+    def test_relative_links_in_the_no_wifi_pages_resolve(self):
+        for rel in ("README.md", os.path.join("docs", "no-wifi.md"), os.path.join("docs", "meshmonitor.md")):
+            text = read(os.path.join(ROOT, rel))
+            for target in re.findall(r"\]\((?!https?:|#|mailto:)([^)#\s]+)", text):
+                with self.subTest(file=rel, link=target):
+                    self.assertTrue(os.path.exists(os.path.normpath(os.path.join(ROOT, os.path.dirname(rel), target))))
 
     def test_the_end_user_compose_file(self):
         import yaml

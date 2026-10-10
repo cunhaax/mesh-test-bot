@@ -13,6 +13,8 @@
 # Bridge: https://meshmonitor.org/configuration/ble-bridge.html (not tested with this bot).
 services:
   ble-bridge:
+    # Runs privileged, so for anything long-lived consider pinning a version (or digest)
+    # instead of :latest, and updating it on purpose.
     image: ghcr.io/yeraze/meshtastic-ble-bridge:latest
     container_name: meshtastic-ble-bridge
     restart: unless-stopped
@@ -28,6 +30,7 @@ services:
     volumes:
       - /var/run/dbus:/var/run/dbus
       - /var/lib/bluetooth:/var/lib/bluetooth:ro   # the pairing
+    # The address is given both ways, exactly as MeshMonitor's own BLE overlay does.
     environment:
       - BLE_ADDRESS=${BLE_ADDRESS:?set BLE_ADDRESS in .env}
     command: ["${BLE_ADDRESS}"]
@@ -35,8 +38,3 @@ services:
   meshmonitor:
     depends_on:
       - ble-bridge
-    logging:                       # same cap as in with-meshmonitor.yml
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
