@@ -1070,6 +1070,7 @@ class CheckRadioTest(unittest.TestCase):
         self.assertIn("x:4403", msg)
         self.assertIn("OSError: No route to host", msg)
         self.assertIn("MTBOT_HOST", msg)
+        self.assertIn("docs/no-wifi.md", msg)
 
     def test_a_hanging_connection_times_out_and_is_fully_closed_before_check_radio_returns(self):
         # Simulates a connect attempt that eventually resolves on its own (e.g. once the OS's

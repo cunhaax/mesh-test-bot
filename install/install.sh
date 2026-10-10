@@ -70,6 +70,10 @@ for f in .env docker-compose.yml env.example; do
 done
 
 say "mesh-test-bot: a few questions (press Enter to accept the default in [brackets])."
+if [ -z "${MTB_CONNECTION:-}" ]; then
+    say "(Radio with no WiFi, only USB/Bluetooth, e.g. RAK4631? Set up MeshMonitor with its bridge"
+    say " first and answer 'existing': https://github.com/$REPO/blob/master/docs/no-wifi.md)"
+fi
 ask MTB_CONNECTION "Connect directly to the radio, through an existing MeshMonitor, or set up a new MeshMonitor here? [direct/existing/setup]" direct
 MTB_CONNECTION=$(printf '%s' "$MTB_CONNECTION" | tr 'A-Z' 'a-z')
 case $MTB_CONNECTION in

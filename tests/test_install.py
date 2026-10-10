@@ -344,6 +344,7 @@ class PipedInstallerTest(unittest.TestCase):
             "MTBOT_TIMEZONE": "Europe/Lisbon", "MTBOT_LISTEN_MINUTES": "120", "MTBOT_MESSAGE_COUNT": "3",
             "MTBOT_REPORT_WINDOW_MINUTES": "60"})
         self.assertIn("Radio's IP", screen)
+        self.assertIn("docs/no-wifi.md", screen)  # the hint for radios without WiFi
 
     def test_curl_pipe_sh_refuses_a_bad_answer(self):
         code, screen, out = run_like_curl_pipe(
@@ -437,12 +438,48 @@ class InstalledFilesTest(unittest.TestCase):
 
     def test_every_compose_service_caps_its_docker_log(self):
         import yaml
+        base = yaml.safe_load(read(os.path.join(INSTALL, "with-meshmonitor.yml")))["services"]
         for path in [os.path.join(ROOT, "compose.yaml")] + [
                 os.path.join(INSTALL, f) for f in os.listdir(INSTALL) if f.endswith(".yml")]:
             for name, svc in yaml.safe_load(read(path))["services"].items():
                 with self.subTest(file=os.path.basename(path), service=name):
+                    # an overlay's stub of a service that with-meshmonitor.yml defines inherits its logging
+                    if path.endswith(("-bridge.yml",)) and name in base:
+                        svc = {**base[name], **svc}
                     options = svc.get("logging", {}).get("options", {})
                     self.assertTrue(options.get("max-size") and options.get("max-file"))
+
+    def test_the_bridge_overlays(self):
+        import yaml
+        for fname, svc_name, device_var in (("serial-bridge.yml", "serial-bridge", "SERIAL_DEVICE"),
+                                            ("ble-bridge.yml", "ble-bridge", "BLE_ADDRESS")):
+            with self.subTest(overlay=fname):
+                services = yaml.safe_load(read(os.path.join(INSTALL, fname)))["services"]
+                self.assertEqual(set(services), {svc_name, "meshmonitor"})
+                self.assertEqual(services["meshmonitor"]["depends_on"], [svc_name])
+                self.assertNotIn("ports", services[svc_name])  # the bridge's TCP port has no authentication
+                self.assertIn(device_var, read(os.path.join(INSTALL, fname)))
+
+    def test_a_bridge_name_is_accepted_as_the_radios_address_in_setup_mode(self):
+        for name in ("serial-bridge", "ble-bridge"):
+            with self.subTest(name=name):
+                p, out = run_installer(MTB_CONNECTION="setup", MESHTASTIC_NODE_IP=name, MTBOT_CHANNEL="1",
+                                        MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="0")
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(read_env_file(os.path.join(out, ".env"))["MESHTASTIC_NODE_IP"], name)
+
+    def test_the_no_wifi_hint_is_only_shown_when_the_connection_question_is_asked(self):
+        p, out = run_installer(MTB_CONNECTION="direct", MTBOT_HOST="1.2.3.4", MTBOT_CHANNEL="1",
+                                MTBOT_CHANNEL_NAME="C", MTBOT_PLACE="Porto", MTB_ONESHOT="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("no-wifi", p.stdout)
+
+    def test_relative_links_in_the_no_wifi_pages_resolve(self):
+        for rel in ("README.md", os.path.join("docs", "no-wifi.md"), os.path.join("docs", "meshmonitor.md")):
+            text = read(os.path.join(ROOT, rel))
+            for target in re.findall(r"\]\((?!https?:|#|mailto:)([^)#\s]+)", text):
+                with self.subTest(file=rel, link=target):
+                    self.assertTrue(os.path.exists(os.path.normpath(os.path.join(ROOT, os.path.dirname(rel), target))))
 
     def test_the_end_user_compose_file(self):
         import yaml

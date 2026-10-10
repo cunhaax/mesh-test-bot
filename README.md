@@ -27,7 +27,9 @@ format, the report layout, how messages are read and the random timing are in
 ## Prerequisites
 
 - A Meshtastic radio with WiFi, reachable by IP, with the test channel already
-  configured. The bot does not configure the radio.
+  configured. The bot does not configure the radio. (A radio with only USB or
+  Bluetooth, such as the RAK4631, works through a bridge: see
+  [Radios without WiFi](docs/no-wifi.md).)
 - A **test channel**, ideally: whatever the bot transmits is heard by everyone on that
   channel, in the same LoRa mode.
 - The radio accepts **only one TCP client at a time**: close the app and any other
@@ -164,6 +166,12 @@ radio is unreachable at startup, the bot retries for a few minutes and then **ex
 (see [After installing](#after-installing) above) -- without a supervisor to restart it,
 the scheduler is simply gone until someone notices. The Docker Compose setup already has
 this covered (`restart: unless-stopped`).
+
+## Radios without WiFi (RAK4631, T-Echo, …)
+
+The bot talks to the radio over TCP, so the radio needs an IP address. A radio that only
+has USB and/or Bluetooth needs a small bridge that exposes it on a TCP port: see
+[Radios without WiFi](docs/no-wifi.md) for the recipes (Linux, Raspberry Pi, macOS).
 
 ## With MeshMonitor (optional)
 
