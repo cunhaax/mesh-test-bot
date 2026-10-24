@@ -167,7 +167,8 @@ class ConfigTest(unittest.TestCase):
             cfg = self.load("channel = 1\nplace = Vila, Sul\n")
         self.assertEqual(cfg["place"], "Vila, Sul")
         with self.assertLogs("bot", "WARNING"):
-            self.load("channel = 1\nplace = Vila-Nova\n")
+            self.load("channel = 1\nplace = Vila - Nova\n")
+        self.assertEqual(self.load("channel = 1\nplace = Linda-a-Velha\n")["place"], "Linda-a-Velha")
 
     def test_report_prefix_defaults_to_ack_and_is_configurable(self):
         self.assertEqual(self.load("channel = 1\nplace = Lisboa\n")["report_prefix"], "ACK")
@@ -423,6 +424,13 @@ class ParseMessageTest(unittest.TestCase):
 
     def test_worked_unrelated_chat_is_not_ours(self):
         self.assertIsNone(self.parse("just some unrelated chat"))
+
+    def test_hyphen_inside_a_place_is_not_a_separator(self):
+        self.assertEqual(self.parse("FIELD TEST ALPHA | ABCD | Linda-a-Velha | 2/3"),
+                         bot.Parsed("Linda-a-Velha", 2, 3))
+        self.assertEqual(self.parse("FIELD TEST ALPHA - ABCD - Linda-a-Velha - 2/3"),
+                         bot.Parsed("Linda-a-Velha", 2, 3))
+        self.assertEqual(self.parse("FIELD TEST ALPHA-Linda-a-Velha"), bot.Parsed("Linda-a-Velha", None, None))
 
     def test_empty_fields_are_dropped(self):
         self.assertEqual(self.parse("FIELD TEST ALPHA || Cascais ,, 2/3 -"), bot.Parsed("Cascais", 2, 3))

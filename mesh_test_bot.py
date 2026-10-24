@@ -182,7 +182,9 @@ WEEKDAYS = {name: i for i, names in enumerate([
 MODE_RE = re.compile(r"[A-Za-z0-9_.@-]+")
 
 UNKNOWN_PLACE = "N/A"  # place could not be determined, but the message still started with our prefix
-_FIELD_SEP_RE = re.compile(r"[,|\-]")  # separators allowed between fields after the prefix
+# separators allowed between fields after the prefix; a '-' only counts when a space (or the
+# start/end) is next to it, so a place like "Linda-a-Velha" stays in one piece
+_FIELD_SEP_RE = re.compile(r"[,|]|(?<!\S)-|-(?!\S)")
 _SEQ_RE = re.compile(r"(\d+)\s*/\s*(\d+)")  # "n/total"
 
 
@@ -373,9 +375,9 @@ def load_config(argv):
     cfg["place"] = cfg["place"].strip()
     if "|" in cfg["place"] or "\n" in cfg["place"]:
         sys.exit("`place` cannot contain '|' or line breaks: %r" % cfg["place"])
-    if "," in cfg["place"] or "-" in cfg["place"]:
-        log.warning("`place` contains ',' or '-': other bots will only see the text after the "
-                   "last one in their report (%r).", cfg["place"])
+    if "," in cfg["place"] or re.search(r"(?<!\S)-|-(?!\S)", cfg["place"]):
+        log.warning("`place` contains ',' or a '-' next to a space: other bots will only see the text "
+                   "after the last one in their report (%r).", cfg["place"])
     cfg["keyword"] = cfg["keyword"].strip()
     if not cfg["keyword"] or "|" in cfg["keyword"] or re.search(r"[\x00-\x1f\x7f]", cfg["keyword"]):
         sys.exit("`keyword` cannot be empty or contain '|' or control characters/line breaks: %r" % cfg["keyword"])
