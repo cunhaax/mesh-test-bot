@@ -26,6 +26,11 @@ How a session runs, and what the bot can and cannot do. The [README](../README.m
 - **What can still be lost:** only whatever the radio transmits while the connection
   is down, usually around 1 second. If there are outages, the report says how many
   there were and how much time they added up to.
+- **Messages are sent without requesting an acknowledgement** (`wantAck=False`), so
+  nothing confirms delivery to the sender: the report, built from what other stations
+  send back, is how you tell who heard them. Apps that show a delivery mark (a check
+  mark) on sent messages, MeshMonitor's UI included, may therefore never show one for
+  the bot's messages.
 - **Two of our messages are never closer than 2 minutes** (unless `--unsafe-limits` is used),
   even across a connection outage.
 - The bot depends on the packets' fields and on the library's reconnection behaviour,

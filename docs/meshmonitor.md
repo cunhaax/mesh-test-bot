@@ -94,6 +94,9 @@ MeshMonitor's log then shows `Virtual node server listening on port 4404`.
 - **Nothing else connects directly to the radio** while MeshMonitor holds it: a direct
   connection **knocks it off**, and with it disconnected the Virtual Node has no
   configuration to serve. Use its UI, or connect to the Virtual Node instead.
+- **The bot's messages show no delivery check mark.** It sends them without requesting
+  an acknowledgement, so nothing is acked back (see [How it works](how-it-works.md)).
+  That is expected; the report is what tells you who heard them.
 - **The Virtual Node has no authentication.** Whoever can reach it can use it. That's
   why the example does not publish 4404 outside Docker, and admin commands stay
   disabled.
