@@ -397,6 +397,13 @@ def load_config(argv):
     if len(worst.encode("utf-8")) > MAX_TEXT_BYTES:
         sys.exit("The message does not fit in %d bytes (`place` or `keyword` too long): %r"
                  % (MAX_TEXT_BYTES, worst))
+    ack = str(cfg["want_ack"]).strip().lower()
+    if ack in ("1", "true", "yes", "on"):
+        cfg["want_ack"] = True
+    elif ack in ("0", "false", "no", "off"):
+        cfg["want_ack"] = False
+    else:
+        sys.exit("`want_ack` must be true or false: %r" % cfg["want_ack"])
     cfg["message_count"] = int(cfg["message_count"])
     cfg["listen_minutes"] = float(cfg["listen_minutes"])
     cfg["report_window_minutes"] = float(cfg["report_window_minutes"])
@@ -992,7 +999,8 @@ class Radio:
             if self._healthy():
                 body = text() if callable(text) else text
                 try:
-                    self.iface.sendText(body, channelIndex=self.cfg["channel"], wantAck=False)
+                    self.iface.sendText(body, channelIndex=self.cfg["channel"],
+                                        wantAck=self.cfg["want_ack"])
                 except Exception as e:
                     log.warning("Send failed (%s: %s); retrying", type(e).__name__, e)
                 else:
