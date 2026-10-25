@@ -32,7 +32,7 @@ def preset_name(number):
 def make_cfg(**kw):
     tmp = tempfile.mkdtemp()
     cfg = {"host": "x", "port": 4403, "channel": 2, "channel_name": "Test_Channel", "place": "Lisboa", "keyword": "MTBOT",
-           "report_prefix": "ACK", "mode": "", "mode_aliases": {"BW62-SF7-CR6": "NARROW_FAST"}, "min_gap_seconds": 0.3,
+           "report_prefix": "ACK", "mode": "", "mode_aliases": {"BW62-SF7-CR6": "NARROW_FAST"}, "min_gap_seconds": 0.3, "want_ack": True,
            "session_tolerance_seconds": 60.0, "wake_before_minutes": bot.WAKE_BEFORE_MINUTES,
            "startup_check_seconds": bot.STARTUP_CHECK_SECONDS,
            "startup_check_min_lead_minutes": bot.STARTUP_CHECK_MIN_LEAD_MINUTES,
@@ -174,6 +174,17 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(self.load("channel = 1\nplace = Lisboa\n")["report_prefix"], "ACK")
         cfg = self.load("channel = 1\nplace = Lisboa\nreport_prefix = DONE\n")
         self.assertEqual(cfg["report_prefix"], "DONE")
+
+    def test_want_ack_is_on_by_default_and_can_be_turned_off(self):
+        self.assertIs(self.load("channel = 1\nplace = Lisboa\n")["want_ack"], True)
+        for off in ("false", "no", "0", "off", "False"):
+            self.assertIs(self.load("channel = 1\nplace = Lisboa\nwant_ack = %s\n" % off)["want_ack"], False)
+        for on in ("true", "yes", "1", "on"):
+            self.assertIs(self.load("channel = 1\nplace = Lisboa\nwant_ack = %s\n" % on)["want_ack"], True)
+
+    def test_bad_want_ack_stops_the_start(self):
+        with self.assertRaises(SystemExit):
+            self.load("channel = 1\nplace = Lisboa\nwant_ack = maybe\n")
 
     def test_bad_report_prefix_stops_the_start(self):
         with self.assertRaises(SystemExit):
@@ -948,6 +959,11 @@ class RadioTest(unittest.TestCase):
         self.fail_first = 2
         r = self.radio()
         self.assertEqual(r.send("hello", time.time() + 20), "hello")
+        self.assertEqual(self.ifaces[0].sent, [("hello", 2, True)])
+
+    def test_send_does_not_request_an_ack_when_want_ack_is_off(self):
+        r = self.radio(want_ack=False)
+        self.assertEqual(r.send("hello", time.time() + 20), "hello")
         self.assertEqual(self.ifaces[0].sent, [("hello", 2, False)])
 
     def test_send_builds_the_text_at_the_last_moment_with_the_stations_own_name(self):
@@ -1327,7 +1343,7 @@ class SessionTest(unittest.TestCase):
                 mock.patch.object(bot.random, "random", lambda: 0.5):  # the one message at the middle of its window
             bot.run_window(cfg, start, end, factory=lambda host, port: iface)
 
-        self.assertEqual(iface.sent, [("MTBOT | 270f | Lisboa | 1/1", 2, False)])  # my_num 9999 = 0x270f
+        self.assertEqual(iface.sent, [("MTBOT | 270f | Lisboa | 1/1", 2, True)])  # my_num 9999 = 0x270f
         text = open(cfg["report_file"], encoding="utf-8").read()
         self.assertIn("ACK | CD34 | 0 | Vila Alta | RF", text)
         lines = open(cfg["report_json_file"], encoding="utf-8").read().splitlines()
