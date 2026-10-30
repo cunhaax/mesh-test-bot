@@ -214,6 +214,22 @@ ul.plain {
 }
 ul.plain li { margin: 6px 0; }
 
+details.path {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 10px 0;
+}
+
+details.path summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+details.path ol { padding-left: 1.3em; }
+details.path li { margin: 10px 0; }
+
 footer {
   border-top: 1px solid var(--border);
   padding: 24px 0 40px;

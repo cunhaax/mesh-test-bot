@@ -1,0 +1,92 @@
+# mesh-test-bot for a Bluetooth-only radio (e.g. RAK4631): everything in one file.
+#
+#   radio ⇄ Bluetooth ⇄ ble-bridge ⇄ MeshMonitor ⇄ Virtual Node ⇄ bot
+#
+# Needs a LINUX host (a Raspberry Pi, for example) with Bluetooth, BlueZ and D-Bus. Docker
+# Desktop on Windows and macOS cannot reach Bluetooth. Full guide: docs/no-wifi.md
+#
+#   1. Pair the radio on this machine, once (bluetoothctl: agent on, pair, trust).
+#   2. Save this file as docker-compose.yml, and ble.env.example next to it as .env.
+#      Fill in .env, then: docker compose up -d
+#   3. Open MeshMonitor's web UI (admin / changeme), change the password and enable the
+#      Virtual Node on the source. The bot connects by itself within a few minutes.
+#
+# Not tested with this bot on a real radio: it follows MeshMonitor's documentation.
+services:
+  ble-bridge:
+    # Runs privileged, so for anything long-lived consider pinning a version (or digest)
+    # instead of :latest, and updating it on purpose.
+    image: ghcr.io/yeraze/meshtastic-ble-bridge:latest
+    container_name: meshtastic-ble-bridge
+    restart: unless-stopped
+    # Full access to the host's hardware, which BLE needs. Do not publish 4403: the
+    # bridge's TCP port has no authentication or encryption (MeshMonitor reaches it over
+    # Docker's internal network, by the name "ble-bridge").
+    privileged: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - /var/run/dbus:/var/run/dbus
+      - /var/lib/bluetooth:/var/lib/bluetooth:ro   # the pairing
+    # The address is given both ways, exactly as MeshMonitor's own BLE overlay does.
+    environment:
+      - BLE_ADDRESS=${BLE_ADDRESS:?set BLE_ADDRESS in .env}
+      - HEALTH_FILE=/tmp/ble-bridge.health
+    command: ["${BLE_ADDRESS}"]
+    # From MeshMonitor's overlay: the bridge touches this file while data is flowing.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os, sys, time; f = '/tmp/ble-bridge.health'; sys.exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 60 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  meshmonitor:
+    image: ghcr.io/yeraze/meshmonitor:latest      # tested with 4.16.1
+    container_name: meshmonitor
+    restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - ble-bridge
+    env_file: .env
+    environment:
+      MESHTASTIC_NODE_IP: ble-bridge
+      MESHTASTIC_NODE_PORT: "4403"
+    ports:
+      # The web UI, on every network interface of this machine (your LAN included). Change the
+      # default password (admin / changeme) before anyone else can reach it.
+      - "8080:3001"
+      # do NOT publish 4404 (the Virtual Node): it has no authentication. The bot reaches
+      # it over Docker's internal network, by the name "meshmonitor".
+    volumes:
+      - meshmonitor-data:/data
+
+  bot:
+    image: ghcr.io/cunhaax/mesh-test-bot:latest
+    container_name: mesh-test-bot
+    restart: unless-stopped
+    # Cap Docker's own copy of the console output (otherwise it grows forever).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - meshmonitor
+    env_file: .env
+    environment:
+      MTBOT_HOST: meshmonitor
+      MTBOT_PORT: "4404"
+    volumes:
+      - ./data:/data                   # reports and rx.log land here
+
+volumes:
+  meshmonitor-data:

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start here · mesh-test-bot</title>
+<meta name="description" content="Set up mesh-test-bot step by step, with no technical background: install Docker, connect your radio, and check it works.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./"><span class="dot"></span> mesh-test-bot</a>
+    <nav class="langs">
+      <a class="current" href="start.html">EN</a>
+      <a href="pt/start.html">PT</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>Start here</h1>
+    <p class="lead">Three steps. You don't need to know anything about Docker: you copy a
+    few lines, paste them, and press Enter.</p>
+  </section>
+
+  <h2>Before you start</h2>
+  <ul class="plain">
+    <li>⏰ <strong>The computer must be on at test time</strong>, with Docker running. A
+    Raspberry Pi is ideal, because it stays on. A laptop that's asleep misses the test.</li>
+    <li>📡 <strong>Your radio is set up in the Meshtastic app</strong>, with the test
+    channel already added. The bot doesn't configure the radio.</li>
+    <li>📵 <strong>Close the Meshtastic app during a test.</strong> The radio only talks to
+    one program at a time.</li>
+  </ul>
+
+  <h2>1. Install Docker</h2>
+  <p>Docker is a free app that runs the bot for you, so you don't have to install anything
+  else.</p>
+  <ul class="plain">
+    <li><strong>Windows or Mac:</strong> install
+    <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a> and open
+    it. If it asks to restart or to install WSL, say yes. Wait until it says the engine is
+    running, and leave it open. In its settings, turn on starting when you sign in.</li>
+    <li><strong>Raspberry Pi or Linux:</strong> paste these lines in the terminal, then
+    log out and back in:
+<pre><code>curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER</code></pre></li>
+  </ul>
+
+  <h2>2. Pick your setup</h2>
+  <p>📁 <strong>First, choose where the bot will live.</strong> The commands below create a
+  <code>mesh-test-bot</code> folder inside the folder your terminal is in. That's your
+  personal folder when you open a new terminal, which is a fine place for it. To use
+  another folder, go there first, for example with <code>cd Documents</code>. Avoid
+  Downloads and folders synced to the cloud.</p>
+  <p><strong>Don't delete or move this folder.</strong> It holds your settings and your
+  reports, and you'll need it whenever you check, change or stop the bot.</p>
+  <p>A radio without WiFi is usually a RAK4631 or a T-Echo. Open the one that matches you.</p>
+
+  <details class="path">
+    <summary>📶 Radio with WiFi · Mac, Raspberry Pi or Linux</summary>
+    <ol>
+      <li>Connect the radio to your WiFi in the Meshtastic app, and note its <strong>IP
+      address</strong> (like <code>192.168.1.50</code>). It's usually on the radio's screen,
+      or in your router's list of devices.</li>
+      <li>Note the test channel's <strong>name</strong> and <strong>number</strong>: the
+      first channel in the app is 0, the next is 1, and so on.</li>
+      <li>Open the Terminal and paste this line:
+<pre><code>curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh</code></pre></li>
+      <li>Answer the questions. Press Enter to accept the suggestion in [brackets]; you
+      only need to type the radio's IP, the channel and your city.</li>
+      <li>Paste the lines it shows at the end, under "To start it". Before them, run
+      <code>cd mesh-test-bot</code>.</li>
+    </ol>
+  </details>
+
+  <details class="path">
+    <summary>📶 Radio with WiFi · Windows</summary>
+    <ol>
+      <li>Connect the radio to your WiFi in the Meshtastic app, and note its <strong>IP
+      address</strong> (like <code>192.168.1.50</code>). It's usually on the radio's screen,
+      or in your router's list of devices.</li>
+      <li>Note the test channel's <strong>name</strong> and <strong>number</strong>: the
+      first channel in the app is 0, the next is 1, and so on.</li>
+      <li>Open <strong>PowerShell</strong> from the Start menu and paste these lines. The
+      last one opens a file in Notepad:
+<pre><code>mkdir mesh-test-bot
+cd mesh-test-bot
+mkdir data
+curl.exe -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/docker-compose.yml
+curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env
+notepad .env</code></pre></li>
+      <li>In Notepad, change the text after <code>=</code> on these four lines:
+      <code>MTBOT_HOST</code> (the IP), <code>MTBOT_CHANNEL</code> (the number),
+      <code>MTBOT_CHANNEL_NAME</code> and <code>MTBOT_PLACE</code> (your city). Save and
+      close.</li>
+      <li>Back in PowerShell, paste:
+<pre><code>docker compose up -d</code></pre></li>
+    </ol>
+  </details>
+
+  <details class="path">
+    <summary>🔵 Bluetooth-only radio · Raspberry Pi or Linux</summary>
+    <p>This starts three things together: a Bluetooth bridge, MeshMonitor and the bot.
+    Keep the radio within about 10 m of the computer. The phone app can't use Bluetooth
+    while the bridge is connected.</p>
+    <ol>
+      <li>Pair the radio, once. Paste these lines one at a time:
+<pre><code>bluetoothctl
+agent on
+default-agent
+scan on</code></pre>
+      Wait for <code>Meshtastic_XXXX</code> and note its address, then, with your own
+      address:
+<pre><code>pair AA:BB:CC:DD:EE:FF
+trust AA:BB:CC:DD:EE:FF
+exit</code></pre>
+      The PIN is on the radio's screen. A radio with no screen uses <code>123456</code>
+      unless you changed it.</li>
+      <li>Download the files and open the settings:
+<pre><code>mkdir mesh-test-bot &amp;&amp; cd mesh-test-bot &amp;&amp; mkdir data
+curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/with-ble.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/ble.env.example -o .env
+nano .env</code></pre></li>
+      <li>Change the five values: the radio's address, the address you'll open MeshMonitor
+      at, the channel number, the channel's name and your city. To save and leave nano:
+      Ctrl+O, Enter, Ctrl+X.</li>
+      <li>Start everything:
+<pre><code>docker compose up -d</code></pre></li>
+      <li>In a browser, open the MeshMonitor address you typed, on port 8080. Log in with
+      <code>admin</code> / <code>changeme</code> and change the password.</li>
+      <li>Go to <em>Dashboard → Sources</em>, edit the radio's source and turn on
+      <em>Enable Virtual Node</em>, with port <code>4404</code> and <em>Admin commands</em>
+      off. The bot connects by itself within a few minutes.</li>
+    </ol>
+    <p class="calc-note">Nobody has run this setup with the bot on a real radio yet. If you
+    try it, please tell us how it went.
+    <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md#bluetooth-ble">More details</a>.</p>
+  </details>
+
+  <details class="path">
+    <summary>🔵 Bluetooth-only radio · Windows</summary>
+    <p>Docker Desktop can't reach Bluetooth, so a small Windows app does that part.</p>
+    <ol>
+      <li>Pair the radio in <em>Settings → Bluetooth &amp; devices → Add device</em>.</li>
+      <li>Download <code>meshtastic-ble-bridge.exe</code> and run it, following
+      <a href="https://meshmonitor.org/configuration/ble-bridge.html">MeshMonitor's BLE
+      Bridge page</a>. Give it the radio's Bluetooth address and leave the port at 4403.</li>
+      <li>Open <strong>PowerShell</strong> from the Start menu and paste these lines. The
+      last one opens a file in Notepad:
+<pre><code>mkdir mesh-test-bot
+cd mesh-test-bot
+mkdir data
+curl.exe -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/docker-compose.yml
+curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env
+notepad .env</code></pre></li>
+      <li>In Notepad, change the <code>MTBOT_HOST</code> line to
+      <code>MTBOT_HOST=host.docker.internal</code>. Then change the text after
+      <code>=</code> on <code>MTBOT_CHANNEL</code> (the number),
+      <code>MTBOT_CHANNEL_NAME</code> and <code>MTBOT_PLACE</code> (your city). Save and
+      close.</li>
+      <li>Back in PowerShell, paste:
+<pre><code>docker compose up -d</code></pre></li>
+    </ol>
+    <p class="calc-note">Nobody has run this setup with the bot yet. If you try it, please
+    tell us how it went.</p>
+  </details>
+
+  <details class="path">
+    <summary>🔵 Bluetooth-only radio · Mac</summary>
+    <p>Bluetooth doesn't work here: Docker on a Mac can't reach it, and there's no Mac
+    bridge app. Use a Raspberry Pi if you have one, or connect the radio by USB cable with
+    <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md#macos-with-usb">these steps</a>.</p>
+  </details>
+
+  <h2>3. Check it works</h2>
+  <p>From the <code>mesh-test-bot</code> folder, paste the line below. If you opened a new
+  terminal, go back to the folder first with <code>cd mesh-test-bot</code> (from wherever
+  you created it). Every <code>docker compose</code> command on this page must run from
+  that folder.</p>
+  <pre><code>docker compose logs -f --no-log-prefix bot</code></pre>
+  <p>Within about a minute you should see <code>Startup check OK</code>. The first line
+  says when the next session is. Press Ctrl+C to stop watching: the bot keeps running.</p>
+  <p>After each session, your report is in the <code>data</code> folder, in
+  <code>report.txt</code>.</p>
+
+  <h2>If something goes wrong</h2>
+  <ul class="plain">
+    <li><strong>An error mentions the Docker daemon, or "docker" isn't recognised:</strong>
+    open Docker Desktop and wait until it's running, or restart the computer.</li>
+    <li><strong><code>Startup check FAILED</code>:</strong> check the IP address, make sure
+    the radio is on, and close the Meshtastic app. The bot keeps retrying by itself. With
+    MeshMonitor, make sure the Virtual Node is on.</li>
+    <li><strong>It says the channel's name doesn't match:</strong> this is a safety check.
+    Fix the number or the name in the <code>.env</code> file, then paste
+    <code>docker compose up -d</code>.</li>
+    <li><strong>You want to change a setting:</strong> edit <code>.env</code>, then paste
+    <code>docker compose up -d</code>.</li>
+    <li><strong>You want to stop the bot:</strong> paste
+    <code>docker compose down</code>.</li>
+    <li><strong>Still stuck?</strong>
+    <a href="https://github.com/cunhaax/mesh-test-bot/issues">Open an issue</a> and paste
+    what the check in step 3 shows.</li>
+  </ul>
+</main>
+
+<footer>
+  <div class="wrap">
+    Copyright © 2026 André Cunha · <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/LICENSE">GPL-3.0-or-later</a> · not affiliated with Meshtastic LLC or MeshMonitor
+  </div>
+</footer>
+</body>
+</html>
