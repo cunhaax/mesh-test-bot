@@ -28,7 +28,7 @@
       what signal — so you don't have to babysit a laptop to test coverage.
     </p>
     <div class="cta-row">
-      <a class="btn primary" href="https://github.com/cunhaax/mesh-test-bot#quick-install-docker-no-git">Quick install</a>
+      <a class="btn primary" href="start.html">Start here</a>
       <a class="btn ghost" href="https://github.com/cunhaax/mesh-test-bot">View on GitHub</a>
     </div>
     <p class="disclaimer">
@@ -91,15 +91,15 @@ ACK | EF56 | 1-2 | Valley    | RF</pre>
   somewhere, for network-wide coverage stats across everyone running the bot.</p>
 
   <h2>Get started</h2>
-  <p>One command, if you already have Docker:</p>
+  <p><strong>New to this, or don't know what Docker is? Follow <a href="start.html">Start here</a>.</strong></p>
+  <p>Otherwise, on Linux, macOS or a Raspberry Pi, one command, if you already have Docker:</p>
   <pre><code>curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh</code></pre>
   <p>It asks a few questions — how the bot should reach the radio (directly, through an
   existing <a href="https://meshmonitor.org">MeshMonitor</a>, or by setting one up right
   here), the test channel, your city, the message prefixes, and whether to run once now
   or on a recurring schedule, and the session length, number of messages and report window
   — press Enter for any default. Then it prints the commands that start the bot(s): it never starts anything by itself.
-  No WiFi on your radio (USB or Bluetooth only, like the RAK4631)? Set up MeshMonitor with
-  its bridge first, then choose "existing":
+  No WiFi on your radio (USB or Bluetooth only, like the RAK4631)? See
   <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md">radios without WiFi</a>.
   See the README for installing from source or without Docker, and the
   <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/meshmonitor.md">MeshMonitor guide</a>

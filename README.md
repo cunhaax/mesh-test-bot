@@ -4,14 +4,13 @@ A bot for automatic **range tests** on a Meshtastic network. It sends a few shor
 messages on a channel, listens for other bots' messages on the same channel, and at
 the end writes a report of who was heard, over how many hops, with what SNR and RSSI,
 and how many of each station's messages arrived. Runs in Docker (or with Python),
-connected to your radio over WiFi, and repeats itself every week.
+connected to your radio, and repeats itself every week.
 
-The report also records the radio's own LoRa mode for each session (`Mode:` in
-`report.txt`'s header, `radio.mode` in `report.jsonl`), so you can compare sessions
-run in different modes on the same channel. It's read from the radio's own
-configuration, never typed by hand: the preset's name (`LONG_FAST`, `NARROW_FAST`…)
-or, for manual settings, `BW<kHz>-SF<n>-CR<n>` (e.g. `BW62-SF7-CR6`), which
-`mode_aliases` can rename. Only set `mode` yourself to force a label instead.
+**New to this, or don't know what Docker is? Follow
+[Start here](https://cunhaax.github.io/mesh-test-bot/start.html)** (also in
+[Portuguese](https://cunhaax.github.io/mesh-test-bot/pt/start.html)). It covers WiFi radios on
+Windows, Mac, Linux and Raspberry Pi, and Bluetooth radios on Windows, Linux and Raspberry Pi. The rest of this page is the
+full reference.
 
 > **Unofficial project.** Not affiliated with or endorsed by the Meshtastic project.
 > "Meshtastic" is a trademark of Meshtastic LLC, used here only to indicate which
@@ -23,6 +22,13 @@ The bot sends short messages such as `MTBOT | ABCD | City | 2/3`, listens for th
 from other stations, and writes a readable report and a JSON line per session. The field-by-field
 format, the report layout, how messages are read and the random timing are in
 [The message, the report and how messages are read](docs/message-and-report.md).
+
+The report also records the radio's own LoRa mode for each session (`Mode:` in
+`report.txt`'s header, `radio.mode` in `report.jsonl`), so you can compare sessions
+run in different modes on the same channel. It's read from the radio's own
+configuration, never typed by hand: the preset's name (`LONG_FAST`, `NARROW_FAST`…)
+or, for manual settings, `BW<kHz>-SF<n>-CR<n>` (e.g. `BW62-SF7-CR6`), which
+`mode_aliases` can rename. Only set `mode` yourself to force a label instead.
 
 ## Prerequisites
 
@@ -56,8 +62,7 @@ window, and whether to run on a recurring weekly schedule or on demand — press
 Creates a `mesh-test-bot/` folder with the configuration, and prints the exact
 `docker compose` commands that start it (the installer never starts anything itself:
 you run it, and know what it does). If
-you'd rather read the script before running it, download it and open it: it's about a
-short.
+you'd rather read the script before running it, download it and open it.
 
 ### By hand (also on Windows)
 
@@ -170,8 +175,10 @@ this covered (`restart: unless-stopped`).
 ## Radios without WiFi (RAK4631, T-Echo, …)
 
 The bot talks to the radio over TCP, so the radio needs an IP address. A radio that only
-has USB and/or Bluetooth needs a small bridge that exposes it on a TCP port: see
-[Radios without WiFi](docs/no-wifi.md) for the recipes (Linux, Raspberry Pi, macOS).
+has USB and/or Bluetooth needs a small bridge that exposes it on a TCP port. For Bluetooth
+on Linux or a Raspberry Pi, one compose file ([`install/with-ble.yml`](install/with-ble.yml))
+runs the bridge, MeshMonitor and the bot together (not yet tested on a real radio). See
+[Radios without WiFi](docs/no-wifi.md) for the recipes (Linux, Raspberry Pi, macOS, Windows).
 
 ## With MeshMonitor (optional)
 

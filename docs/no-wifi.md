@@ -16,6 +16,15 @@ needs a purpose-built program (below). Either way it is the same single-client r
 always: **one program at a time** talks to the radio, so if MeshMonitor is in the path,
 the bridge goes to MeshMonitor and the bot connects to its Virtual Node.
 
+**Bluetooth on Linux or a Raspberry Pi?** Skip to [Bluetooth (BLE)](#bluetooth-ble): one
+compose file holds the bridge, MeshMonitor and the bot. **On Windows**, see
+[Bluetooth on Windows](#bluetooth-on-windows).
+
+| Connection | Linux / Raspberry Pi | Windows | macOS |
+|---|---|---|---|
+| Bluetooth | [`with-ble.yml`](#bluetooth-ble) | [Native bridge app](#bluetooth-on-windows) | Not possible |
+| USB | [Serial bridge](#linux-or-raspberry-pi-with-usb) | WSL2 and usbipd-win ([MeshMonitor's page](https://meshmonitor.org/configuration/serial-bridge.html)) | [`socat` on the Mac](#macos-with-usb) |
+
 ## Two ways to set it up
 
 MeshMonitor has a ready-made bridge for each case ([Serial Bridge](https://meshmonitor.org/configuration/serial-bridge.html)
@@ -132,8 +141,8 @@ TCP slot by MeshMonitor, and the bot, the web UI and the app can all use the Vir
 radio ⇄ BLE ⇄ ble-bridge (:4403) ⇄ MeshMonitor ⇄ Virtual Node (:4404) ⇄ bot
 ```
 
-It needs a **Linux host** with BlueZ and D-Bus (on macOS, Docker cannot reach Bluetooth;
-use USB). Steps:
+It needs a **Linux host** with BlueZ and D-Bus. Docker Desktop cannot reach Bluetooth, so
+on macOS use USB, and on Windows use the [native bridge](#bluetooth-on-windows). Steps:
 
 1. **Pair the radio on the host**, once:
    ```sh
@@ -149,24 +158,59 @@ use USB). Steps:
    the default `123456` unless you changed it.
    (The address also shows with
    `docker run --rm --privileged -v /var/run/dbus:/var/run/dbus ghcr.io/yeraze/meshtastic-ble-bridge:latest --scan`.)
-2. Follow way A above with `ble-bridge.yml`, setting `BLE_ADDRESS` to that address
-   (or way B, with MeshMonitor's own overlay from its BLE page).
-3. After starting, check the bridge:
+2. Download the all-in-one compose file and its settings, and fill in the settings
+   (`BLE_ADDRESS` is the address from step 1):
+   ```sh
+   mkdir -p mesh-test-bot/data && cd mesh-test-bot
+   curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/with-ble.yml -o docker-compose.yml
+   [ -e .env ] || curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/ble.env.example -o .env
+   nano .env
+   docker compose up -d
+   ```
+3. Check the bridge:
    ```sh
    docker compose logs ble-bridge
    ```
    It should say it connected to the BLE device and that the TCP server is listening on
    :4403 (the wording is MeshMonitor's, not checked here).
+4. Open MeshMonitor at the `ALLOWED_ORIGINS` address, log in with `admin` / `changeme`,
+   change the password and [enable the Virtual Node](meshmonitor.md#enabling-the-virtual-node).
+   This step can't go in the compose file. Until it's done, `Startup check FAILED` in the
+   bot's log is expected: the bot retries by itself and connects within a few minutes.
+
+Installed the bot **directly to the radio**? Start over in a new folder with the steps
+above. Installed it with **"set up a new MeshMonitor here"**? Add the bridge instead: do step
+2 of way A with `ble-bridge.yml` and `BLE_ADDRESS`, and set `MESHTASTIC_NODE_IP=ble-bridge` in
+`.env`. Running **your own MeshMonitor**? Use way B, with MeshMonitor's own overlay from its
+BLE page.
 
 Notes: the bridge runs `privileged` and its TCP port has no authentication or
-encryption, so do not publish 4403 (the overlay does not). The bridge can also run on a
-different Linux machine (`network_mode: host`); then set `MESHTASTIC_NODE_IP` to that
-machine's address. Without MeshMonitor you can point the bot straight at the bridge
+encryption, so do not publish 4403 (neither compose file does). Outside `with-ble.yml`,
+whose addresses are fixed in the file and can't be changed from `.env`, the bridge can also
+run on a different Linux machine (`network_mode: host`); then set `MESHTASTIC_NODE_IP` to
+that machine's address. Without MeshMonitor you can point the bot straight at the bridge
 (`MTBOT_HOST` = its address), but then nothing else can use the radio.
 
 **Not tested with this bot or a real RAK4631**: it follows MeshMonitor's documentation,
 and the bot sees the Virtual Node like any other radio, but nobody has run this
 combination yet.
+
+## Bluetooth on Windows
+
+MeshMonitor's [BLE bridge](https://meshmonitor.org/configuration/ble-bridge.html) also comes
+as a native Windows tray app, `meshtastic-ble-bridge.exe`, serving the same TCP port (4403
+by default) on Windows itself. Pair the radio in Windows' Bluetooth settings and start the
+app with the radio's address, following that page. The app must be running at test time.
+Its Auto-start setting connects when the app opens, but doesn't open it after a restart.
+The bot then runs in Docker Desktop, where
+the Windows machine is `host.docker.internal`, so set `MTBOT_HOST=host.docker.internal` in
+`.env`. Nothing else can use the radio while the bot does.
+
+The port has no authentication or encryption, so don't allow it through the Windows
+firewall for other machines.
+
+**Not tested with this bot**: it combines MeshMonitor's documentation with Docker Desktop's
+standard address for the host.
 
 ## Checking it works
 
