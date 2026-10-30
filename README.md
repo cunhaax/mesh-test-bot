@@ -8,8 +8,8 @@ connected to your radio, and repeats itself every week.
 
 **New to this, or don't know what Docker is? Follow
 [Start here](https://cunhaax.github.io/mesh-test-bot/start.html)** (also in
-[Portuguese](https://cunhaax.github.io/mesh-test-bot/pt/start.html)). It covers WiFi and
-Bluetooth radios on Windows, Mac, Linux and Raspberry Pi. The rest of this page is the
+[Portuguese](https://cunhaax.github.io/mesh-test-bot/pt/start.html)). It covers WiFi radios on
+Windows, Mac, Linux and Raspberry Pi, and Bluetooth radios on Windows, Linux and Raspberry Pi. The rest of this page is the
 full reference.
 
 > **Unofficial project.** Not affiliated with or endorsed by the Meshtastic project.
@@ -177,7 +177,7 @@ this covered (`restart: unless-stopped`).
 The bot talks to the radio over TCP, so the radio needs an IP address. A radio that only
 has USB and/or Bluetooth needs a small bridge that exposes it on a TCP port. For Bluetooth
 on Linux or a Raspberry Pi, one compose file ([`install/with-ble.yml`](install/with-ble.yml))
-runs the bridge, MeshMonitor and the bot together. See
+runs the bridge, MeshMonitor and the bot together (not yet tested on a real radio). See
 [Radios without WiFi](docs/no-wifi.md) for the recipes (Linux, Raspberry Pi, macOS, Windows).
 
 ## With MeshMonitor (optional)

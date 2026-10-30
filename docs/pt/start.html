@@ -42,8 +42,8 @@
   <ul class="plain">
     <li><strong>Windows ou Mac:</strong> instala o
     <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a> e abre-o.
-    Se pedir para reiniciar ou instalar o WSL, aceita. Espera até indicar que o motor está
-    a correr, e deixa-o aberto. Nas definições, ativa o arranque ao iniciar sessão.</li>
+    Se pedir para reiniciar ou instalar o WSL, aceita. Espera até indicar <em>Engine
+    running</em>, e deixa-o aberto. Nas definições, ativa o arranque ao iniciar sessão.</li>
     <li><strong>Raspberry Pi ou Linux:</strong> cola estas linhas no terminal, e depois
     termina a sessão e volta a entrar:
 <pre><code>curl -fsSL https://get.docker.com | sh
@@ -54,8 +54,8 @@ sudo usermod -aG docker $USER</code></pre></li>
   <p>📁 <strong>Primeiro, escolhe onde o bot vai ficar.</strong> Os comandos abaixo criam
   uma pasta <code>mesh-test-bot</code> dentro da pasta onde o terminal está. Quando abres
   um terminal novo, essa é a tua pasta pessoal, e é um bom sítio. Para usar outra pasta,
-  vai primeiro até lá, por exemplo com <code>cd Documents</code>. Evita as Transferências e
-  pastas sincronizadas com a nuvem.</p>
+  vai primeiro até lá com <code>cd</code> e o nome da pasta. Evita as Transferências e
+  pastas sincronizadas com a nuvem, como o OneDrive ou o iCloud.</p>
   <p><strong>Não apagues nem movas esta pasta.</strong> Guarda as tuas definições e os teus
   relatórios, e vais precisar dela sempre que quiseres ver, alterar ou parar o bot.</p>
   <p>Um rádio sem WiFi é normalmente um RAK4631 ou um T-Echo. Abre a opção que te serve.</p>
@@ -71,10 +71,14 @@ sudo usermod -aG docker $USER</code></pre></li>
       <li>Abre o Terminal e cola esta linha:
 <pre><code>curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/install.sh | sh</code></pre></li>
       <li>Responde às perguntas. Carrega em Enter para aceitar a sugestão entre [parênteses
-      retos]; só precisas de escrever o IP do rádio, o canal e a tua cidade. As perguntas
-      aparecem em inglês.</li>
-      <li>Cola as linhas que aparecem no fim, debaixo de "To start it". Antes delas, corre
-      <code>cd mesh-test-bot</code>.</li>
+      retos]; só precisas de escrever o IP do rádio, o número e o nome do canal, e a tua
+      cidade. As perguntas aparecem em inglês.</li>
+      <li>Arranca o bot colando estas linhas. Podes ignorar o texto que o instalador
+      mostrou no fim:
+<pre><code>cd mesh-test-bot
+docker compose pull
+docker compose up -d</code></pre>
+      Se escolheste configurar o MeshMonitor, segue antes o texto do instalador.</li>
     </ol>
   </details>
 
@@ -88,12 +92,13 @@ sudo usermod -aG docker $USER</code></pre></li>
       primeiro canal na app é o 0, o seguinte é o 1, e assim por diante.</li>
       <li>Abre o <strong>PowerShell</strong> a partir do menu Iniciar e cola estas linhas. A
       última abre um ficheiro no Bloco de Notas:
-<pre><code>mkdir mesh-test-bot
+<pre><code>mkdir -Force mesh-test-bot\data
 cd mesh-test-bot
-mkdir data
 curl.exe -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/docker-compose.yml
-curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env
-notepad .env</code></pre></li>
+if (!(Test-Path .env)) { curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env }
+notepad .env</code></pre>
+      Faz isto uma vez. Se a pasta já existir, corre <code>cd mesh-test-bot</code> e depois
+      só <code>notepad .env</code>.</li>
       <li>No Bloco de Notas, muda o texto depois do <code>=</code> nestas quatro linhas:
       <code>MTBOT_HOST</code> (o IP), <code>MTBOT_CHANNEL</code> (o número),
       <code>MTBOT_CHANNEL_NAME</code> e <code>MTBOT_PLACE</code> (a tua cidade). Guarda e
@@ -106,8 +111,11 @@ notepad .env</code></pre></li>
   <details class="path">
     <summary>🔵 Rádio só com Bluetooth · Raspberry Pi ou Linux</summary>
     <p>Isto arranca três coisas em conjunto: uma ponte Bluetooth, o MeshMonitor e o bot.
-    Mantém o rádio a cerca de 10 m do computador, no máximo. A app no telemóvel não pode
-    usar Bluetooth enquanto a ponte estiver ligada.</p>
+    Mantém o rádio a cerca de 10 m do computador, no máximo.</p>
+    <p><strong>Primeiro, desliga o telemóvel do rádio</strong>, ou desativa o Bluetooth do
+    telemóvel. O rádio aceita uma ligação Bluetooth de cada vez: enquanto o telemóvel a
+    ocupar, o computador não encontra o rádio, e o telemóvel não o pode usar durante os
+    testes.</p>
     <ol>
       <li>Emparelha o rádio, uma vez. Cola estas linhas uma a uma:
 <pre><code>bluetoothctl
@@ -121,21 +129,30 @@ trust AA:BB:CC:DD:EE:FF
 exit</code></pre>
       O PIN está no ecrã do rádio. Um rádio sem ecrã usa <code>123456</code>, a não ser que
       o tenhas mudado.</li>
+      <li>Descobre o endereço IP deste computador. É o primeiro número que isto mostra,
+      algo como <code>192.168.1.60</code>:
+<pre><code>hostname -I</code></pre></li>
       <li>Descarrega os ficheiros e abre as definições:
-<pre><code>mkdir mesh-test-bot &amp;&amp; cd mesh-test-bot &amp;&amp; mkdir data
+<pre><code>mkdir -p mesh-test-bot/data &amp;&amp; cd mesh-test-bot
 curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/with-ble.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/ble.env.example -o .env
-nano .env</code></pre></li>
-      <li>Muda os cinco valores: o endereço do rádio, o endereço onde vais abrir o
-      MeshMonitor, o número do canal, o nome do canal e a tua cidade. Para guardar e sair do
-      nano: Ctrl+O, Enter, Ctrl+X.</li>
+[ -e .env ] || curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/ble.env.example -o .env
+nano .env</code></pre>
+      Faz isto uma vez. Se a pasta já existir, corre <code>cd mesh-test-bot</code> e depois
+      só <code>nano .env</code>.</li>
+      <li>Muda os cinco valores. Em <code>BLE_ADDRESS</code>, usa o endereço do rádio. Em
+      <code>ALLOWED_ORIGINS</code>, escreve <code>http://</code>, o IP deste computador e
+      <code>:8080</code>, por exemplo <code>http://192.168.1.60:8080</code>. Depois define o
+      número do canal, o nome do canal e a tua cidade. Para guardar e sair do nano: Ctrl+O,
+      Enter, Ctrl+X.</li>
       <li>Arranca tudo:
 <pre><code>docker compose up -d</code></pre></li>
-      <li>Num navegador, abre o endereço do MeshMonitor que escreveste, na porta 8080. Entra
-      com <code>admin</code> / <code>changeme</code> e muda a palavra-passe.</li>
+      <li>Num navegador, abre exatamente o endereço que escreveste em
+      <code>ALLOWED_ORIGINS</code>. Entra com <code>admin</code> / <code>changeme</code> e muda a palavra-passe.</li>
       <li>Vai a <em>Dashboard → Sources</em>, edita a fonte do rádio e ativa <em>Enable
-      Virtual Node</em>, com a porta <code>4404</code> e <em>Admin commands</em> desligado.
-      O bot liga-se sozinho em poucos minutos.</li>
+      Virtual Node</em>, com a porta <code>4404</code> e <em>Admin commands</em> desligado.</li>
+      <li>Espera alguns minutos. No passo 3 abaixo, as linhas
+      <code>Startup check FAILED</code> anteriores a este momento são normais. O bot continua
+      a tentar até veres <code>Startup check OK</code>.</li>
     </ol>
     <p class="calc-note">Ninguém testou ainda esta configuração com o bot num rádio real.
     Se experimentares, conta-nos como correu.
@@ -145,22 +162,31 @@ nano .env</code></pre></li>
   <details class="path">
     <summary>🔵 Rádio só com Bluetooth · Windows</summary>
     <p>O Docker Desktop não chega ao Bluetooth, por isso uma pequena aplicação do Windows
-    trata dessa parte.</p>
+    trata dessa parte. <strong>Essa aplicação também tem de estar a correr à hora do
+    teste.</strong></p>
+    <p><strong>Primeiro, desliga o telemóvel do rádio</strong>, ou desativa o Bluetooth do
+    telemóvel. O rádio aceita uma ligação Bluetooth de cada vez.</p>
     <ol>
       <li>Emparelha o rádio em <em>Definições → Bluetooth e dispositivos → Adicionar
-      dispositivo</em>.</li>
-      <li>Descarrega o <code>meshtastic-ble-bridge.exe</code> e corre-o, seguindo a
+      dispositivo</em>. O PIN está no ecrã do rádio. Um rádio sem ecrã usa <code>123456</code>,
+      a não ser que o tenhas mudado. Depois abre o rádio nessa lista e aponta o endereço
+      Bluetooth.</li>
+      <li>Descarrega o <code>meshtastic-ble-bridge.exe</code> da
       <a href="https://meshmonitor.org/configuration/ble-bridge.html">página BLE Bridge do
-      MeshMonitor</a> (em inglês). Indica o endereço Bluetooth do rádio e deixa a porta em
-      4403.</li>
+      MeshMonitor</a> (em inglês) e corre-o. Aparece como um ícone junto ao relógio.</li>
+      <li>Clica no ícone com o botão direito e abre <em>Settings</em>. Indica o endereço
+      Bluetooth, deixa a porta em 4403, ativa <em>Auto-start</em> e clica em <em>Connect</em>.
+      Depois de reiniciar o computador, abre a aplicação outra vez. Se o Windows perguntar
+      pela firewall, não autorizes outros computadores.</li>
       <li>Abre o <strong>PowerShell</strong> a partir do menu Iniciar e cola estas linhas. A
       última abre um ficheiro no Bloco de Notas:
-<pre><code>mkdir mesh-test-bot
+<pre><code>mkdir -Force mesh-test-bot\data
 cd mesh-test-bot
-mkdir data
 curl.exe -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/docker-compose.yml
-curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env
-notepad .env</code></pre></li>
+if (!(Test-Path .env)) { curl.exe -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env }
+notepad .env</code></pre>
+      Faz isto uma vez. Se a pasta já existir, corre <code>cd mesh-test-bot</code> e depois
+      só <code>notepad .env</code>.</li>
       <li>No Bloco de Notas, muda a linha <code>MTBOT_HOST</code> para
       <code>MTBOT_HOST=host.docker.internal</code>. Depois muda o texto depois do
       <code>=</code> em <code>MTBOT_CHANNEL</code> (o número),
@@ -176,8 +202,17 @@ notepad .env</code></pre></li>
   <details class="path">
     <summary>🔵 Rádio só com Bluetooth · Mac</summary>
     <p>O Bluetooth não funciona aqui: o Docker num Mac não lhe chega, e não há aplicação de
-    ponte para Mac. Usa um Raspberry Pi se tiveres um, ou liga o rádio por cabo USB com
-    <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md#macos-with-usb">estes passos</a> (em inglês).</p>
+    ponte para Mac. Usa um Raspberry Pi se tiveres um, ou liga o rádio por cabo USB:</p>
+    <ol>
+      <li>Segue <a href="https://github.com/cunhaax/mesh-test-bot/blob/master/docs/no-wifi.md#macos-with-usb">estes
+      passos</a> (em inglês) para arrancar o <code>socat</code>. Precisas do
+      <a href="https://brew.sh">Homebrew</a> para o instalar. Deixa essa janela do Terminal
+      aberta, também à hora do teste.</li>
+      <li>Numa nova janela do Terminal, segue os passos de WiFi para Mac acima. Quando o
+      instalador pedir o IP do rádio, escreve <code>host.docker.internal</code>.</li>
+    </ol>
+    <p class="calc-note">Ninguém testou ainda esta configuração com o bot. Se experimentares,
+    conta-nos como correu.</p>
   </details>
 
   <h2>3. Confirma que funciona</h2>
@@ -189,20 +224,27 @@ notepad .env</code></pre></li>
   <p>Em cerca de um minuto deves ver <code>Startup check OK</code>. A primeira linha diz
   quando é a próxima sessão. Carrega em Ctrl+C para deixar de ver: o bot continua a
   correr.</p>
+  <p>Se escolheste on-demand no instalador, não há verificação inicial: vais ver
+  <code>Sending at:</code>, e o bot para quando a sessão acaba.</p>
   <p>Depois de cada sessão, o relatório fica na pasta <code>data</code>, em
   <code>report.txt</code>.</p>
 
   <h2>Se algo correr mal</h2>
   <ul class="plain">
     <li><strong>Um erro fala no Docker daemon, ou "docker" não é reconhecido:</strong> abre
-    o Docker Desktop e espera até estar a correr, ou reinicia o computador.</li>
-    <li><strong><code>Startup check FAILED</code>:</strong> confirma o endereço IP, vê se o
-    rádio está ligado e fecha a app Meshtastic. O bot continua a tentar sozinho. Com
-    MeshMonitor, confirma que o Virtual Node está ativo.</li>
-    <li><strong>Diz que o nome do canal não corresponde:</strong> é uma verificação de
-    segurança. Corrige o número ou o nome no ficheiro <code>.env</code>, e cola
-    <code>docker compose up -d</code>.</li>
-    <li><strong>Queres mudar uma definição:</strong> edita o <code>.env</code>, e cola
+    o Docker Desktop e espera até estar a correr, ou reinicia o computador. Num Raspberry Pi
+    ou em Linux, termina a sessão e volta a entrar.</li>
+    <li><strong>O log diz <code>Channel 1 is called 'X', expected 'Y'</code>:</strong> é uma
+    verificação de segurança, por isso o bot não emite. Corrige o número ou o nome do canal
+    no <code>.env</code> (ver abaixo).</li>
+    <li><strong>Qualquer outro <code>Startup check FAILED</code>:</strong> confirma o
+    endereço IP, vê se o rádio está ligado e fecha a app Meshtastic. O bot continua a tentar
+    sozinho. Com MeshMonitor, confirma que o Virtual Node está ativo.</li>
+    <li><strong>O MeshMonitor não abre ou não deixa entrar:</strong> o endereço no navegador
+    tem de ser exatamente igual ao <code>ALLOWED_ORIGINS</code> no <code>.env</code>.</li>
+    <li><strong>Queres mudar uma definição:</strong> a partir da pasta
+    <code>mesh-test-bot</code>, abre as definições com <code>nano .env</code> (Mac, Raspberry
+    Pi, Linux) ou <code>notepad .env</code> (Windows). Depois cola
     <code>docker compose up -d</code>.</li>
     <li><strong>Queres parar o bot:</strong> cola <code>docker compose down</code>.</li>
     <li><strong>Continuas com problemas?</strong>
