@@ -434,7 +434,9 @@ class InstalledFilesTest(unittest.TestCase):
         active = {m.group(1) for line in read(os.path.join(INSTALL, "env.example")).splitlines()
                   if (m := re.match(r"(MTBOT_\w+)=", line))}
         self.assertEqual(active, {"MTBOT_HOST", "MTBOT_CHANNEL", "MTBOT_CHANNEL_NAME", "MTBOT_PLACE",
-                                  "MTBOT_KEYWORD", "MTBOT_REPORT_PREFIX"})
+                                  "MTBOT_KEYWORD", "MTBOT_REPORT_PREFIX", "MTBOT_PORT", "MTBOT_WEEKDAY",
+                                  "MTBOT_START_TIME", "MTBOT_TIMEZONE", "MTBOT_LISTEN_MINUTES",
+                                  "MTBOT_MESSAGE_COUNT", "MTBOT_REPORT_WINDOW_MINUTES"})
 
     def test_every_compose_service_caps_its_docker_log(self):
         import yaml
