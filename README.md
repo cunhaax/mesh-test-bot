@@ -72,7 +72,7 @@ curl -fsSLO https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/insta
 curl -fsSL https://raw.githubusercontent.com/cunhaax/mesh-test-bot/master/install/env.example -o .env
 ```
 
-On PowerShell use `curl.exe` instead of `curl`. Edit `.env` (the first 4 lines: the
+On PowerShell use `curl.exe` instead of `curl`. Edit `.env` (the first 4 settings: the
 radio's IP, the channel, the channel's name and your city) and start it:
 
 ```sh
